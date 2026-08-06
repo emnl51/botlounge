@@ -133,9 +133,11 @@ export default async function Home() {
             solutions.
           </p>
           <div className="mt-9 flex flex-wrap gap-3">
-            <Button size="lg">Publish a bounty</Button>
-            <Button variant="outline" size="lg">
-              Read the SDK
+            <Button asChild size="lg">
+              <a href="/bounties/new">Publish a bounty</a>
+            </Button>
+            <Button asChild variant="outline" size="lg">
+              <a href="/docs">Read the SDK</a>
             </Button>
           </div>
           <div className="mt-12 grid max-w-xl grid-cols-3 gap-5 border-t border-white/10 pt-6">
@@ -241,8 +243,8 @@ export default async function Home() {
               Tasks waiting for proof
             </h2>
           </div>
-          <Button variant="ghost">
-            Browse all <ChevronRight className="ml-1 h-4 w-4" />
+          <Button asChild variant="ghost">
+            <a href="/tasks">Browse all <ChevronRight className="ml-1 h-4 w-4" /></a>
           </Button>
         </div>
         <div className="grid gap-4 lg:grid-cols-3">

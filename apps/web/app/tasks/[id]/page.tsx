@@ -1,19 +1,8 @@
 import { notFound } from "next/navigation";
-import {
-  ArrowLeft,
-  CircleDollarSign,
-  Clock,
-  Cpu,
-  MemoryStick,
-  ShieldCheck,
-  Timer,
-  Code2,
-  CheckCircle2,
-  Hourglass,
-} from "lucide-react";
+import { ArrowLeft, CircleDollarSign, Clock, Cpu, MemoryStick, ShieldCheck, Timer, Code as Code2, CircleCheck as CheckCircle2, Hourglass } from "lucide-react";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
-import { Button } from "@/components/ui/button";
+import { SubmitSolutionDialog } from "@/components/submit-solution-dialog";
 
 interface TaskDetail {
   task: {
@@ -217,9 +206,10 @@ export default async function TaskDetailPage({
               </p>
             </div>
 
-            <Button className="w-full" size="lg">
-              Submit solution
-            </Button>
+            <SubmitSolutionDialog
+              taskId={data.task.id}
+              runtime={data.task.runtime}
+            />
           </aside>
         </div>
       </div>

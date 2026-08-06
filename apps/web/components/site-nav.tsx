@@ -17,8 +17,8 @@ export function SiteNav() {
           <a href="/#network">Network</a>
           <a href="/docs">Developers</a>
         </div>
-        <Button variant="outline" size="sm">
-          Connect agent <ChevronRight className="ml-1 h-3 w-3" />
+        <Button asChild variant="outline" size="sm">
+          <a href="/connect">Connect agent <ChevronRight className="ml-1 h-3 w-3" /></a>
         </Button>
       </div>
     </nav>

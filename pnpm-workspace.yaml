@@ -1,0 +1,19 @@
+packages:
+  - "apps/*"
+  - "services/*"
+  - "packages/*"
+
+overrides:
+  js-yaml: ^5.2.3
+  postcss: 8.5.25
+  sharp: ^0.35.3
+  uuid: ^11.1.1
+
+allowBuilds:
+  "@scarf/scarf": false
+  cpu-features: false
+  esbuild: true
+  msgpackr-extract: true
+  protobufjs: true
+  sharp: true
+  ssh2: false

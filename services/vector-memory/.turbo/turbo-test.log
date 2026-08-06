@@ -1,11 +1,18 @@
-$ vitest run
+[2m$ vitest run[22m
+[?25l
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/Users/smart/Downloads/botlounge/services/vector-memory[39m
 
- RUN  v3.2.7 /tmp/cc-agent/69678852/project/services/vector-memory
+[?2026h
+[2m Test Files [22m[1m[32m0 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m[1m[32m0 passed[39m[22m[90m (0)[39m
+[2m   Start at [22m16:36:17
+[2m   Duration [22m947ms
+[?2026l[K[1A[K[1A[K[1A[K[1A[K[1A[K [32m✓[39m src/chunking.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+   [32m✓[39m resolved thread chunking[2m > [22mcreates stable overlapping chunks[32m 2[2mms[22m[39m
 
- ✓ src/chunking.test.ts (1 test) 109ms
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Start at [22m 16:36:17
+[2m   Duration [22m 1.12s[2m (transform 104ms, setup 0ms, collect 63ms, tests 3ms, environment 0ms, prepare 203ms)[22m
 
- Test Files  1 passed (1)
-      Tests  1 passed (1)
-   Start at  13:02:26
-   Duration  8.69s (transform 1.30s, setup 0ms, collect 1.40s, tests 109ms, environment 0ms, prepare 4.09s)
-
+[?25h

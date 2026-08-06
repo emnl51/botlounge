@@ -11,8 +11,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, } from "@nestjs/common";
-import { agents, audits, executionRuns, ledgerEntries, outboxEvents, posts, submissions, tasks, threads, } from "@agent-forum/database";
-import { and, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { agents, audits, executionRuns, ledgerEntries, outboxEvents, posts, reputationSnapshots, submissions, tasks, threads, } from "@agent-forum/database";
+import { and, asc, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Queue } from "bullmq";
 import { createHash } from "node:crypto";
 import { CONFIG, DATABASE } from "../database.provider.js";
@@ -41,15 +41,6 @@ let ForumService = class ForumService {
             .returning();
         return thread;
     }
-    async listOpenTasks(limit = 30) {
-        return this.database.db
-            .select({ task: tasks, thread: threads })
-            .from(tasks)
-            .innerJoin(threads, eq(tasks.threadId, threads.id))
-            .where(eq(tasks.status, "open"))
-            .orderBy(desc(tasks.createdAt))
-            .limit(Math.min(limit, 100));
-    }
     async getThread(id) {
         const [thread] = await this.database.db
             .select()
@@ -62,9 +53,49 @@ let ForumService = class ForumService {
             .select()
             .from(posts)
             .where(eq(posts.threadId, id))
-            .orderBy(desc(posts.createdAt))
-            .limit(50);
-        return { ...thread, posts: threadPosts };
+            .orderBy(asc(posts.createdAt));
+        const [task] = await this.database.db
+            .select()
+            .from(tasks)
+            .where(eq(tasks.threadId, id))
+            .limit(1);
+        return { ...thread, posts: threadPosts, task: task ?? null };
+    }
+    async createPost(input, principal, signature) {
+        const [thread] = await this.database.db
+            .select({ id: threads.id })
+            .from(threads)
+            .where(eq(threads.id, input.threadId))
+            .limit(1);
+        if (!thread)
+            throw new NotFoundException("Thread not found");
+        if (input.parentPostId) {
+            const [parent] = await this.database.db
+                .select({ threadId: posts.threadId })
+                .from(posts)
+                .where(eq(posts.id, input.parentPostId))
+                .limit(1);
+            if (!parent || parent.threadId !== input.threadId)
+                throw new BadRequestException("Parent post does not belong to thread");
+        }
+        const [post] = await this.database.db
+            .insert(posts)
+            .values({
+            ...input,
+            authorAgentId: principal.agentId,
+            signature,
+        })
+            .returning();
+        return post;
+    }
+    async listOpenTasks(limit = 30) {
+        return this.database.db
+            .select({ task: tasks, thread: threads })
+            .from(tasks)
+            .innerJoin(threads, eq(tasks.threadId, threads.id))
+            .where(eq(tasks.status, "open"))
+            .orderBy(desc(tasks.createdAt))
+            .limit(Math.min(limit, 100));
     }
     async getTask(id) {
         const [row] = await this.database.db
@@ -80,14 +111,78 @@ let ForumService = class ForumService {
             id: submissions.id,
             agentId: submissions.agentId,
             status: submissions.status,
-            sourceDigest: submissions.sourceDigest,
             createdAt: submissions.createdAt,
         })
             .from(submissions)
             .where(eq(submissions.taskId, id))
-            .orderBy(desc(submissions.createdAt))
-            .limit(50);
+            .orderBy(desc(submissions.createdAt));
         return { ...row, submissions: taskSubmissions };
+    }
+    async cancelTask(id, principal) {
+        return this.database.db.transaction(async (tx) => {
+            const [task] = await tx
+                .select()
+                .from(tasks)
+                .where(eq(tasks.id, id))
+                .limit(1);
+            if (!task)
+                throw new NotFoundException("Task not found");
+            if (task.creatorAgentId !== principal.agentId)
+                throw new BadRequestException("Only the task creator can cancel it");
+            if (task.status !== "open" && task.status !== "assigned")
+                throw new ConflictException("Task cannot be cancelled in its current state");
+            const [cancelled] = await tx
+                .update(tasks)
+                .set({ status: "cancelled", updatedAt: new Date() })
+                .where(and(eq(tasks.id, id), ne(tasks.status, "cancelled")))
+                .returning();
+            if (!cancelled)
+                throw new ConflictException("Task was already cancelled");
+            if (task.bountyCredits > 0) {
+                await tx
+                    .update(agents)
+                    .set({
+                    computeCredits: sql `${agents.computeCredits} + ${task.bountyCredits}`,
+                })
+                    .where(eq(agents.id, principal.agentId));
+                await tx.insert(ledgerEntries).values({
+                    agentId: principal.agentId,
+                    taskId: id,
+                    kind: "refund",
+                    amount: task.bountyCredits,
+                    idempotencyKey: `bounty-refund:${id}`,
+                });
+            }
+            return cancelled;
+        });
+    }
+    async getAgentProfile(id) {
+        const [agent] = await this.database.db
+            .select({
+            id: agents.id,
+            name: agents.name,
+            computeCredits: agents.computeCredits,
+            createdAt: agents.createdAt,
+        })
+            .from(agents)
+            .where(and(eq(agents.id, id), eq(agents.isActive, true)))
+            .limit(1);
+        if (!agent)
+            throw new NotFoundException("Agent not found");
+        const [reputation] = await this.database.db
+            .select()
+            .from(reputationSnapshots)
+            .where(eq(reputationSnapshots.agentId, id))
+            .orderBy(desc(reputationSnapshots.calculatedAt))
+            .limit(1);
+        const [stats] = await this.database.db
+            .select({
+            submissions: count(submissions.id),
+            passed: count(sql `case when ${submissions.status} = 'passed' then 1 end`),
+        })
+            .from(submissions)
+            .where(eq(submissions.agentId, id));
+        return { ...agent, reputation: reputation ?? null, stats };
     }
     async createTask(input, principal) {
         const [thread] = await this.database.db
@@ -217,10 +312,6 @@ let ForumService = class ForumService {
             throw new BadRequestException("Workers cannot audit their own submission");
         if (submission.status !== "passed")
             throw new BadRequestException("Only sandbox-passing submissions can be audited");
-        await this.database.db
-            .insert(audits)
-            .values({ ...input, auditorAgentId: principal.agentId })
-            .onConflictDoNothing();
         const [task] = await this.database.db
             .select()
             .from(tasks)
@@ -228,6 +319,42 @@ let ForumService = class ForumService {
             .limit(1);
         if (!task)
             throw new NotFoundException("Task not found");
+        const [auditor] = await this.database.db
+            .select({
+            developerId: agents.developerId,
+            createdAt: agents.createdAt,
+            computeCredits: agents.computeCredits,
+        })
+            .from(agents)
+            .where(eq(agents.id, principal.agentId))
+            .limit(1);
+        const relatedAgents = await this.database.db
+            .select({ id: agents.id, developerId: agents.developerId })
+            .from(agents)
+            .where(sql `${agents.id} IN (${submission.agentId}::uuid, ${task.creatorAgentId}::uuid)`);
+        if (!auditor?.developerId)
+            throw new BadRequestException("Auditing requires a verified developer identity");
+        if (relatedAgents.some((agent) => agent.developerId === auditor.developerId))
+            throw new BadRequestException("Worker or task creator developer cannot audit this submission");
+        if (Date.now() - auditor.createdAt.getTime() <
+            this.config.AUDITOR_MIN_ACCOUNT_AGE_HOURS * 3_600_000)
+            throw new BadRequestException("Auditor account is too new");
+        if (auditor.computeCredits < this.config.AUDITOR_MIN_STAKE_CREDITS)
+            throw new BadRequestException("Auditor stake threshold is not met");
+        const [auditorReputation] = await this.database.db
+            .select()
+            .from(reputationSnapshots)
+            .where(eq(reputationSnapshots.agentId, principal.agentId))
+            .orderBy(desc(reputationSnapshots.calculatedAt))
+            .limit(1);
+        if (!auditorReputation ||
+            auditorReputation.sampleSize < this.config.AUDITOR_MIN_SAMPLE_SIZE ||
+            auditorReputation.reliabilityScore < this.config.AUDITOR_MIN_RELIABILITY)
+            throw new BadRequestException("Auditor reputation threshold is not met");
+        await this.database.db
+            .insert(audits)
+            .values({ ...input, auditorAgentId: principal.agentId })
+            .onConflictDoNothing();
         const [votes] = await this.database.db
             .select({
             approvals: count(sql `case when ${audits.verdict} = 'approve' then 1 end`),

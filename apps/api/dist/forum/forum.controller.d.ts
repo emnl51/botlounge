@@ -1,3 +1,4 @@
+import type { Request } from "express";
 import { type AgentPrincipal } from "@agent-forum/contracts";
 import { ForumService } from "./forum.service.js";
 export declare class ForumController {
@@ -8,7 +9,7 @@ export declare class ForumController {
         updatedAt: Date;
         id: string;
         authorAgentId: string;
-        kind: "discussion" | "task" | "bounty";
+        kind: "task" | "discussion" | "bounty";
         title: string;
         body: string;
         tags: string[];
@@ -25,25 +26,52 @@ export declare class ForumController {
             body: string;
             signature: string;
         }[];
+        task: {
+            createdAt: Date;
+            updatedAt: Date;
+            id: string;
+            threadId: string;
+            creatorAgentId: string;
+            runtime: "python" | "javascript";
+            status: "open" | "assigned" | "verifying" | "resolved" | "cancelled";
+            prompt: string;
+            testCodeEncrypted: string;
+            timeoutMs: number;
+            memoryMb: number;
+            cpuMillis: number;
+            bountyCredits: number;
+            requiredAudits: number;
+            acceptedSubmissionId: string | null;
+        } | null;
         createdAt: Date;
         updatedAt: Date;
         id: string;
         authorAgentId: string;
-        kind: "discussion" | "task" | "bounty";
+        kind: "task" | "discussion" | "bounty";
         title: string;
         body: string;
         tags: string[];
         resolvedAt: Date | null;
     }>;
+    createPost(body: unknown, principal: AgentPrincipal, request: Request): Promise<{
+        signature: string;
+        createdAt: Date;
+        updatedAt: Date;
+        id: string;
+        threadId: string;
+        authorAgentId: string;
+        body: string;
+        parentPostId: string | null;
+    } | undefined>;
     createThread(body: unknown, principal: AgentPrincipal): Promise<{
+        tags: string[];
         createdAt: Date;
         updatedAt: Date;
         id: string;
         authorAgentId: string;
-        kind: "discussion" | "task" | "bounty";
+        kind: "task" | "discussion" | "bounty";
         title: string;
         body: string;
-        tags: string[];
         resolvedAt: Date | null;
     } | undefined>;
     listTasks(limit?: string): Promise<{
@@ -69,7 +97,7 @@ export declare class ForumController {
             updatedAt: Date;
             id: string;
             authorAgentId: string;
-            kind: "discussion" | "task" | "bounty";
+            kind: "task" | "discussion" | "bounty";
             title: string;
             body: string;
             tags: string[];
@@ -80,8 +108,7 @@ export declare class ForumController {
         submissions: {
             id: string;
             agentId: string;
-            status: "queued" | "running" | "passed" | "failed" | "rejected";
-            sourceDigest: string;
+            status: "failed" | "queued" | "running" | "passed" | "rejected";
             createdAt: Date;
         }[];
         task: {
@@ -106,7 +133,7 @@ export declare class ForumController {
             updatedAt: Date;
             id: string;
             authorAgentId: string;
-            kind: "discussion" | "task" | "bounty";
+            kind: "task" | "discussion" | "bounty";
             title: string;
             body: string;
             tags: string[];
@@ -114,6 +141,23 @@ export declare class ForumController {
         };
     }>;
     createTask(body: unknown, principal: AgentPrincipal): Promise<{
+        status: "open" | "assigned" | "verifying" | "resolved" | "cancelled";
+        createdAt: Date;
+        updatedAt: Date;
+        id: string;
+        threadId: string;
+        creatorAgentId: string;
+        runtime: "python" | "javascript";
+        prompt: string;
+        testCodeEncrypted: string;
+        timeoutMs: number;
+        memoryMb: number;
+        cpuMillis: number;
+        bountyCredits: number;
+        requiredAudits: number;
+        acceptedSubmissionId: string | null;
+    }>;
+    cancelTask(id: string, principal: AgentPrincipal): Promise<{
         createdAt: Date;
         updatedAt: Date;
         id: string;
@@ -130,14 +174,35 @@ export declare class ForumController {
         requiredAudits: number;
         acceptedSubmissionId: string | null;
     }>;
+    getAgent(id: string): Promise<{
+        reputation: {
+            id: string;
+            agentId: string;
+            reliabilityScore: number;
+            verifiedSuccessRate: number;
+            speedScore: number;
+            hallucinationIndex: number;
+            auditAgreementRate: number;
+            sampleSize: number;
+            calculatedAt: Date;
+        } | null;
+        stats: {
+            submissions: number;
+            passed: number;
+        } | undefined;
+        id: string;
+        name: string;
+        computeCredits: number;
+        createdAt: Date;
+    }>;
     submit(body: unknown, principal: AgentPrincipal): Promise<{
         computeStatusUrl: string;
+        status: "failed" | "queued" | "running" | "passed" | "rejected";
         createdAt: Date;
         updatedAt: Date;
         id: string;
-        status: "queued" | "running" | "passed" | "failed" | "rejected";
-        taskId: string;
         agentId: string;
+        taskId: string;
         idempotencyKey: string;
         sourceCode: string;
         sourceDigest: string;
@@ -169,7 +234,7 @@ export declare class ForumController {
         idempotencyKey: string;
         sourceCode: string;
         sourceDigest: string;
-        status: "queued" | "running" | "passed" | "failed" | "rejected";
+        status: "failed" | "queued" | "running" | "passed" | "rejected";
     }>;
     audit(body: unknown, principal: AgentPrincipal): Promise<{
         approvals: number;

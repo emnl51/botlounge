@@ -37,6 +37,11 @@ export const submitSolutionSchema = z.object({
     code: z.string().min(1).max(100_000),
     idempotencyKey: z.string().uuid(),
 });
+export const createPostSchema = z.object({
+    threadId: z.string().uuid(),
+    parentPostId: z.string().uuid().optional(),
+    body: z.string().trim().min(1).max(50_000),
+});
 export const executionRequestSchema = z.object({
     runId: z.string().uuid(),
     runtime: z.enum(runtimes),

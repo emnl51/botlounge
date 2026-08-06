@@ -63,6 +63,19 @@ export declare const submitSolutionSchema: z.ZodObject<{
     taskId: string;
     idempotencyKey: string;
 }>;
+export declare const createPostSchema: z.ZodObject<{
+    threadId: z.ZodString;
+    parentPostId: z.ZodOptional<z.ZodString>;
+    body: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    body: string;
+    threadId: string;
+    parentPostId?: string | undefined;
+}, {
+    body: string;
+    threadId: string;
+    parentPostId?: string | undefined;
+}>;
 export declare const executionRequestSchema: z.ZodObject<{
     runId: z.ZodString;
     runtime: z.ZodEnum<["python", "javascript"]>;
@@ -159,6 +172,7 @@ export declare const knowledgeQuerySchema: z.ZodObject<{
 export type CreateThread = z.infer<typeof createThreadSchema>;
 export type CreateTask = z.infer<typeof createTaskSchema>;
 export type SubmitSolution = z.infer<typeof submitSolutionSchema>;
+export type CreatePost = z.infer<typeof createPostSchema>;
 export type ExecutionRequest = z.infer<typeof executionRequestSchema>;
 export type ExecutionResult = z.infer<typeof executionResultSchema>;
 export type KnowledgeQuery = z.infer<typeof knowledgeQuerySchema>;
@@ -174,6 +188,7 @@ export interface AgentPrincipal {
     apiKeyId: string;
     publicKey: string;
     quotaPerMinute: number;
+    computeQuotaDaily: number;
     computeCreditsRemaining: number;
 }
 export interface ReputationFactors {

@@ -1,0 +1,1344 @@
+diff --git a/apps/api/src/auth/auth.controller.ts b/apps/api/src/auth/auth.controller.ts
+index ed55ab6..4ab3bb2 100644
+--- a/apps/api/src/auth/auth.controller.ts
++++ b/apps/api/src/auth/auth.controller.ts
+@@ -1,4 +1,16 @@
+-import { Body, Controller, Get, Post } from "@nestjs/common";
++import {
++  Body,
++  Controller,
++  Delete,
++  Get,
++  Param,
++  ParseUUIDPipe,
++  Post,
++  Req,
++} from "@nestjs/common";
++import type { Request } from "express";
++import type { AgentPrincipal } from "@agent-forum/contracts";
++import { Principal } from "./principal.decorator.js";
+ import { ApiOperation, ApiTags } from "@nestjs/swagger";
+ import { z } from "zod";
+ import { Public } from "./public.decorator.js";
+@@ -9,6 +21,7 @@ const registrationSchema = z.object({
+   publicKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+   challenge: z.string().min(40).max(64),
+   signature: z.string().min(80).max(100),
++  developerToken: z.string().min(80).max(200).optional(),
+ });
+ 
+ @ApiTags("identity")
+@@ -21,8 +34,8 @@ export class AuthController {
+   @ApiOperation({
+     summary: "Create a one-time Proof-of-Agent registration challenge",
+   })
+-  challenge() {
+-    return this.auth.challenge();
++  challenge(@Req() request: Request) {
++    return this.auth.challenge(request.ip ?? "unknown");
+   }
+ 
+   @Public()
+@@ -30,7 +43,28 @@ export class AuthController {
+   @ApiOperation({
+     summary: "Register an Ed25519 agent identity and issue its initial API key",
+   })
+-  register(@Body() body: unknown) {
+-    return this.auth.register(registrationSchema.parse(body));
++  register(@Body() body: unknown, @Req() request: Request) {
++    return this.auth.register(
++      registrationSchema.parse(body),
++      request.ip ?? "unknown",
++    );
++  }
++
++  @Get("keys")
++  listKeys(@Principal() principal: AgentPrincipal) {
++    return this.auth.listKeys(principal.agentId);
++  }
++
++  @Post("keys")
++  createKey(@Principal() principal: AgentPrincipal) {
++    return this.auth.createKey(principal.agentId);
++  }
++
++  @Delete("keys/:id")
++  revokeKey(
++    @Param("id", ParseUUIDPipe) id: string,
++    @Principal() principal: AgentPrincipal,
++  ) {
++    return this.auth.revokeKey(id, principal);
+   }
+ }
+diff --git a/apps/api/src/auth/auth.service.ts b/apps/api/src/auth/auth.service.ts
+index 7575ea1..81e14de 100644
+--- a/apps/api/src/auth/auth.service.ts
++++ b/apps/api/src/auth/auth.service.ts
+@@ -1,14 +1,18 @@
+ import {
+   ConflictException,
++  HttpException,
++  HttpStatus,
+   Inject,
+   Injectable,
+   UnauthorizedException,
+ } from "@nestjs/common";
+-import { randomBytes, randomUUID } from "node:crypto";
++import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+ import { agents, apiKeys } from "@agent-forum/database";
+-import { eq } from "drizzle-orm";
++import { and, eq, isNull } from "drizzle-orm";
++import type { AgentPrincipal } from "@agent-forum/contracts";
+ import type { Redis } from "ioredis";
+-import { DATABASE, REDIS } from "../database.provider.js";
++import type { AppConfig } from "../config.js";
++import { CONFIG, DATABASE, REDIS } from "../database.provider.js";
+ import { sha256Hex, verifyEd25519 } from "./canonical.js";
+ 
+ @Injectable()
+@@ -19,20 +23,40 @@ export class AuthService {
+       typeof import("@agent-forum/database").createDatabase
+     >,
+     @Inject(REDIS) private readonly redis: Redis,
++    @Inject(CONFIG) private readonly config: AppConfig,
+   ) {}
+ 
+-  async challenge(): Promise<{ challenge: string; expiresInSeconds: number }> {
++  private async enforcePublicLimit(kind: string, ip: string, limit: number) {
++    const key = `public-rate:${kind}:${ip}:${Math.floor(Date.now() / 60_000)}`;
++    const count = await this.redis.incr(key);
++    if (count === 1) await this.redis.expire(key, 120);
++    if (count > limit)
++      throw new HttpException(
++        "Public endpoint rate limit exceeded",
++        HttpStatus.TOO_MANY_REQUESTS,
++      );
++  }
++
++  async challenge(
++    ip: string,
++  ): Promise<{ challenge: string; expiresInSeconds: number }> {
++    await this.enforcePublicLimit("challenge", ip, 10);
+     const challenge = randomBytes(32).toString("base64url");
+     await this.redis.set(`poa:challenge:${challenge}`, "1", "EX", 300, "NX");
+     return { challenge, expiresInSeconds: 300 };
+   }
+ 
+-  async register(input: {
+-    name: string;
+-    publicKey: string;
+-    challenge: string;
+-    signature: string;
+-  }) {
++  async register(
++    input: {
++      name: string;
++      publicKey: string;
++      challenge: string;
++      signature: string;
++      developerToken?: string | undefined;
++    },
++    ip: string,
++  ) {
++    await this.enforcePublicLimit("register", ip, 5);
+     const exists = await this.redis.get(`poa:challenge:${input.challenge}`);
+     if (!exists)
+       throw new UnauthorizedException("Challenge is invalid or expired");
+@@ -49,10 +73,13 @@ export class AuthService {
+       throw new ConflictException("Public key is already registered");
+ 
+     const plainApiKey = `afn_${randomBytes(32).toString("base64url")}`;
++    const developerId = input.developerToken
++      ? this.verifyDeveloperToken(input.developerToken)
++      : undefined;
+     const [agent] = await this.database.db.transaction(async (tx) => {
+       const created = await tx
+         .insert(agents)
+-        .values({ name: input.name, publicKey: input.publicKey })
++        .values({ name: input.name, publicKey: input.publicKey, developerId })
+         .returning();
+       const current = created[0];
+       if (!current) throw new Error("Agent insert failed");
+@@ -70,4 +97,75 @@ export class AuthService {
+       warning: "Store this API key now; it will not be shown again.",
+     };
+   }
++
++  private verifyDeveloperToken(token: string): string {
++    const match = /^dev_([0-9a-f-]{36})_([A-Za-z0-9_-]{43})$/i.exec(token);
++    if (!match?.[1] || !match[2])
++      throw new UnauthorizedException("Invalid developer verification token");
++    const expected = createHmac(
++      "sha256",
++      this.config.DEVELOPER_TOKEN_SIGNING_SECRET,
++    )
++      .update(match[1])
++      .digest("base64url");
++    const actualBuffer = Buffer.from(match[2]);
++    const expectedBuffer = Buffer.from(expected);
++    if (
++      actualBuffer.length !== expectedBuffer.length ||
++      !timingSafeEqual(actualBuffer, expectedBuffer)
++    )
++      throw new UnauthorizedException("Invalid developer verification token");
++    return match[1];
++  }
++
++  async listKeys(agentId: string) {
++    return this.database.db
++      .select({
++        id: apiKeys.id,
++        keyPrefix: apiKeys.keyPrefix,
++        quotaPerMinute: apiKeys.quotaPerMinute,
++        computeQuotaDaily: apiKeys.computeQuotaDaily,
++        lastUsedAt: apiKeys.lastUsedAt,
++        createdAt: apiKeys.createdAt,
++      })
++      .from(apiKeys)
++      .where(and(eq(apiKeys.agentId, agentId), isNull(apiKeys.revokedAt)));
++  }
++
++  async createKey(agentId: string) {
++    const plainApiKey = `afn_${randomBytes(32).toString("base64url")}`;
++    const [key] = await this.database.db
++      .insert(apiKeys)
++      .values({
++        agentId,
++        keyPrefix: plainApiKey.slice(0, 12),
++        keyHash: sha256Hex(plainApiKey),
++      })
++      .returning({ id: apiKeys.id, keyPrefix: apiKeys.keyPrefix });
++    return {
++      ...key,
++      apiKey: plainApiKey,
++      warning: "Store this API key now; it will not be shown again.",
++    };
++  }
++
++  async revokeKey(id: string, principal: AgentPrincipal) {
++    if (id === principal.apiKeyId)
++      throw new ConflictException(
++        "Create another key before revoking the active key",
++      );
++    const [revoked] = await this.database.db
++      .update(apiKeys)
++      .set({ revokedAt: new Date(), updatedAt: new Date() })
++      .where(
++        and(
++          eq(apiKeys.id, id),
++          eq(apiKeys.agentId, principal.agentId),
++          isNull(apiKeys.revokedAt),
++        ),
++      )
++      .returning({ id: apiKeys.id, revokedAt: apiKeys.revokedAt });
++    if (!revoked) throw new UnauthorizedException("API key not found");
++    return revoked;
++  }
+ }
+diff --git a/apps/api/src/auth/proof.guard.ts b/apps/api/src/auth/proof.guard.ts
+index ca09484..ec6426f 100644
+--- a/apps/api/src/auth/proof.guard.ts
++++ b/apps/api/src/auth/proof.guard.ts
+@@ -73,6 +73,7 @@ export class ProofOfAgentGuard implements CanActivate {
+         agentId: agents.id,
+         publicKey: agents.publicKey,
+         quotaPerMinute: apiKeys.quotaPerMinute,
++        computeQuotaDaily: apiKeys.computeQuotaDaily,
+         computeCredits: agents.computeCredits,
+       })
+       .from(apiKeys)
+@@ -130,9 +131,14 @@ export class ProofOfAgentGuard implements CanActivate {
+       apiKeyId: record.apiKeyId,
+       publicKey: record.publicKey,
+       quotaPerMinute: record.quotaPerMinute,
++      computeQuotaDaily: record.computeQuotaDaily,
+       computeCreditsRemaining: record.computeCredits,
+     };
+     request.principal = principal;
++    await this.database.db
++      .update(apiKeys)
++      .set({ lastUsedAt: new Date(), updatedAt: new Date() })
++      .where(eq(apiKeys.id, record.apiKeyId));
+     return true;
+   }
+ 
+diff --git a/apps/api/src/config.ts b/apps/api/src/config.ts
+index ac372bb..d632425 100644
+--- a/apps/api/src/config.ts
++++ b/apps/api/src/config.ts
+@@ -11,6 +11,7 @@ const schema = z.object({
+   VECTOR_MEMORY_URL: z.string().url().default("http://vector-memory:4200"),
+   REPUTATION_URL: z.string().url().default("http://reputation-engine:4300"),
+   INTERNAL_SERVICE_TOKEN: z.string().min(32),
++  DEVELOPER_TOKEN_SIGNING_SECRET: z.string().min(32),
+   TEST_CODE_ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+   SIGNATURE_MAX_AGE_SECONDS: z.coerce
+     .number()
+@@ -22,6 +23,10 @@ const schema = z.object({
+   LOG_LEVEL: z
+     .enum(["error", "warn", "log", "debug", "verbose"])
+     .default("log"),
++  AUDITOR_MIN_ACCOUNT_AGE_HOURS: z.coerce.number().int().min(0).default(24),
++  AUDITOR_MIN_SAMPLE_SIZE: z.coerce.number().int().min(0).default(3),
++  AUDITOR_MIN_RELIABILITY: z.coerce.number().min(0).max(1).default(0.6),
++  AUDITOR_MIN_STAKE_CREDITS: z.coerce.number().int().min(0).default(1_000),
+ });
+ 
+ export type AppConfig = z.infer<typeof schema>;
+diff --git a/apps/api/src/forum/forum.controller.ts b/apps/api/src/forum/forum.controller.ts
+index ff18952..f41ae5e 100644
+--- a/apps/api/src/forum/forum.controller.ts
++++ b/apps/api/src/forum/forum.controller.ts
+@@ -1,15 +1,19 @@
+ import {
+   Body,
+   Controller,
++  Delete,
+   Get,
+   Param,
+   ParseUUIDPipe,
+   Post,
+   Query,
++  Req,
+ } from "@nestjs/common";
++import type { Request } from "express";
+ import { ApiOperation, ApiTags } from "@nestjs/swagger";
+ import {
+   createTaskSchema,
++  createPostSchema,
+   createThreadSchema,
+   submitSolutionSchema,
+   type AgentPrincipal,
+@@ -43,6 +47,19 @@ export class ForumController {
+     return this.forum.getThread(id);
+   }
+ 
++  @Post("posts")
++  createPost(
++    @Body() body: unknown,
++    @Principal() principal: AgentPrincipal,
++    @Req() request: Request,
++  ) {
++    return this.forum.createPost(
++      createPostSchema.parse(body),
++      principal,
++      request.header("x-agent-signature") ?? "",
++    );
++  }
++
+   @Post("threads")
+   @ApiOperation({
+     summary: "Create a signed discussion, task, or bounty thread",
+@@ -68,6 +85,20 @@ export class ForumController {
+     return this.forum.createTask(createTaskSchema.parse(body), principal);
+   }
+ 
++  @Delete("tasks/:id")
++  cancelTask(
++    @Param("id", ParseUUIDPipe) id: string,
++    @Principal() principal: AgentPrincipal,
++  ) {
++    return this.forum.cancelTask(id, principal);
++  }
++
++  @Public()
++  @Get("agents/:id")
++  getAgent(@Param("id", ParseUUIDPipe) id: string) {
++    return this.forum.getAgentProfile(id);
++  }
++
+   @Post("submissions")
+   submit(@Body() body: unknown, @Principal() principal: AgentPrincipal) {
+     return this.forum.submit(submitSolutionSchema.parse(body), principal);
+diff --git a/apps/api/src/forum/forum.service.ts b/apps/api/src/forum/forum.service.ts
+index a08391a..8cdce55 100644
+--- a/apps/api/src/forum/forum.service.ts
++++ b/apps/api/src/forum/forum.service.ts
+@@ -7,6 +7,7 @@ import {
+ } from "@nestjs/common";
+ import type {
+   AgentPrincipal,
++  CreatePost,
+   CreateTask,
+   CreateThread,
+   SubmitSolution,
+@@ -18,11 +19,12 @@ import {
+   ledgerEntries,
+   outboxEvents,
+   posts,
++  reputationSnapshots,
+   submissions,
+   tasks,
+   threads,
+ } from "@agent-forum/database";
+-import { and, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
++import { and, asc, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
+ import { Queue } from "bullmq";
+ import { createHash } from "node:crypto";
+ import type { AppConfig } from "../config.js";
+@@ -58,16 +60,6 @@ export class ForumService {
+     return thread;
+   }
+ 
+-  async listOpenTasks(limit = 30) {
+-    return this.database.db
+-      .select({ task: tasks, thread: threads })
+-      .from(tasks)
+-      .innerJoin(threads, eq(tasks.threadId, threads.id))
+-      .where(eq(tasks.status, "open"))
+-      .orderBy(desc(tasks.createdAt))
+-      .limit(Math.min(limit, 100));
+-  }
+-
+   async getThread(id: string) {
+     const [thread] = await this.database.db
+       .select()
+@@ -79,9 +71,54 @@ export class ForumService {
+       .select()
+       .from(posts)
+       .where(eq(posts.threadId, id))
+-      .orderBy(desc(posts.createdAt))
+-      .limit(50);
+-    return { ...thread, posts: threadPosts };
++      .orderBy(asc(posts.createdAt));
++    const [task] = await this.database.db
++      .select()
++      .from(tasks)
++      .where(eq(tasks.threadId, id))
++      .limit(1);
++    return { ...thread, posts: threadPosts, task: task ?? null };
++  }
++
++  async createPost(
++    input: CreatePost,
++    principal: AgentPrincipal,
++    signature: string,
++  ) {
++    const [thread] = await this.database.db
++      .select({ id: threads.id })
++      .from(threads)
++      .where(eq(threads.id, input.threadId))
++      .limit(1);
++    if (!thread) throw new NotFoundException("Thread not found");
++    if (input.parentPostId) {
++      const [parent] = await this.database.db
++        .select({ threadId: posts.threadId })
++        .from(posts)
++        .where(eq(posts.id, input.parentPostId))
++        .limit(1);
++      if (!parent || parent.threadId !== input.threadId)
++        throw new BadRequestException("Parent post does not belong to thread");
++    }
++    const [post] = await this.database.db
++      .insert(posts)
++      .values({
++        ...input,
++        authorAgentId: principal.agentId,
++        signature,
++      })
++      .returning();
++    return post;
++  }
++
++  async listOpenTasks(limit = 30) {
++    return this.database.db
++      .select({ task: tasks, thread: threads })
++      .from(tasks)
++      .innerJoin(threads, eq(tasks.threadId, threads.id))
++      .where(eq(tasks.status, "open"))
++      .orderBy(desc(tasks.createdAt))
++      .limit(Math.min(limit, 100));
+   }
+ 
+   async getTask(id: string) {
+@@ -97,16 +134,83 @@ export class ForumService {
+         id: submissions.id,
+         agentId: submissions.agentId,
+         status: submissions.status,
+-        sourceDigest: submissions.sourceDigest,
+         createdAt: submissions.createdAt,
+       })
+       .from(submissions)
+       .where(eq(submissions.taskId, id))
+-      .orderBy(desc(submissions.createdAt))
+-      .limit(50);
++      .orderBy(desc(submissions.createdAt));
+     return { ...row, submissions: taskSubmissions };
+   }
+ 
++  async cancelTask(id: string, principal: AgentPrincipal) {
++    return this.database.db.transaction(async (tx) => {
++      const [task] = await tx
++        .select()
++        .from(tasks)
++        .where(eq(tasks.id, id))
++        .limit(1);
++      if (!task) throw new NotFoundException("Task not found");
++      if (task.creatorAgentId !== principal.agentId)
++        throw new BadRequestException("Only the task creator can cancel it");
++      if (task.status !== "open" && task.status !== "assigned")
++        throw new ConflictException(
++          "Task cannot be cancelled in its current state",
++        );
++      const [cancelled] = await tx
++        .update(tasks)
++        .set({ status: "cancelled", updatedAt: new Date() })
++        .where(and(eq(tasks.id, id), ne(tasks.status, "cancelled")))
++        .returning();
++      if (!cancelled) throw new ConflictException("Task was already cancelled");
++      if (task.bountyCredits > 0) {
++        await tx
++          .update(agents)
++          .set({
++            computeCredits: sql`${agents.computeCredits} + ${task.bountyCredits}`,
++          })
++          .where(eq(agents.id, principal.agentId));
++        await tx.insert(ledgerEntries).values({
++          agentId: principal.agentId,
++          taskId: id,
++          kind: "refund",
++          amount: task.bountyCredits,
++          idempotencyKey: `bounty-refund:${id}`,
++        });
++      }
++      return cancelled;
++    });
++  }
++
++  async getAgentProfile(id: string) {
++    const [agent] = await this.database.db
++      .select({
++        id: agents.id,
++        name: agents.name,
++        computeCredits: agents.computeCredits,
++        createdAt: agents.createdAt,
++      })
++      .from(agents)
++      .where(and(eq(agents.id, id), eq(agents.isActive, true)))
++      .limit(1);
++    if (!agent) throw new NotFoundException("Agent not found");
++    const [reputation] = await this.database.db
++      .select()
++      .from(reputationSnapshots)
++      .where(eq(reputationSnapshots.agentId, id))
++      .orderBy(desc(reputationSnapshots.calculatedAt))
++      .limit(1);
++    const [stats] = await this.database.db
++      .select({
++        submissions: count(submissions.id),
++        passed: count(
++          sql`case when ${submissions.status} = 'passed' then 1 end`,
++        ),
++      })
++      .from(submissions)
++      .where(eq(submissions.agentId, id));
++    return { ...agent, reputation: reputation ?? null, stats };
++  }
++
+   async createTask(input: CreateTask, principal: AgentPrincipal) {
+     const [thread] = await this.database.db
+       .select()
+@@ -275,17 +379,60 @@ export class ForumService {
+       throw new BadRequestException(
+         "Only sandbox-passing submissions can be audited",
+       );
+-    await this.database.db
+-      .insert(audits)
+-      .values({ ...input, auditorAgentId: principal.agentId })
+-      .onConflictDoNothing();
+-
+     const [task] = await this.database.db
+       .select()
+       .from(tasks)
+       .where(eq(tasks.id, submission.taskId))
+       .limit(1);
+     if (!task) throw new NotFoundException("Task not found");
++    const [auditor] = await this.database.db
++      .select({
++        developerId: agents.developerId,
++        createdAt: agents.createdAt,
++        computeCredits: agents.computeCredits,
++      })
++      .from(agents)
++      .where(eq(agents.id, principal.agentId))
++      .limit(1);
++    const relatedAgents = await this.database.db
++      .select({ id: agents.id, developerId: agents.developerId })
++      .from(agents)
++      .where(
++        sql`${agents.id} IN (${submission.agentId}::uuid, ${task.creatorAgentId}::uuid)`,
++      );
++    if (!auditor?.developerId)
++      throw new BadRequestException(
++        "Auditing requires a verified developer identity",
++      );
++    if (
++      relatedAgents.some((agent) => agent.developerId === auditor.developerId)
++    )
++      throw new BadRequestException(
++        "Worker or task creator developer cannot audit this submission",
++      );
++    if (
++      Date.now() - auditor.createdAt.getTime() <
++      this.config.AUDITOR_MIN_ACCOUNT_AGE_HOURS * 3_600_000
++    )
++      throw new BadRequestException("Auditor account is too new");
++    if (auditor.computeCredits < this.config.AUDITOR_MIN_STAKE_CREDITS)
++      throw new BadRequestException("Auditor stake threshold is not met");
++    const [auditorReputation] = await this.database.db
++      .select()
++      .from(reputationSnapshots)
++      .where(eq(reputationSnapshots.agentId, principal.agentId))
++      .orderBy(desc(reputationSnapshots.calculatedAt))
++      .limit(1);
++    if (
++      !auditorReputation ||
++      auditorReputation.sampleSize < this.config.AUDITOR_MIN_SAMPLE_SIZE ||
++      auditorReputation.reliabilityScore < this.config.AUDITOR_MIN_RELIABILITY
++    )
++      throw new BadRequestException("Auditor reputation threshold is not met");
++    await this.database.db
++      .insert(audits)
++      .values({ ...input, auditorAgentId: principal.agentId })
++      .onConflictDoNothing();
+     const [votes] = await this.database.db
+       .select({
+         approvals: count(
+diff --git a/apps/api/src/main.ts b/apps/api/src/main.ts
+index d7154f8..60984b8 100644
+--- a/apps/api/src/main.ts
++++ b/apps/api/src/main.ts
+@@ -14,7 +14,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
+ app.enableCors({
+   origin: config.CORS_ORIGINS.split(","),
+   credentials: false,
+-  methods: ["GET", "POST", "OPTIONS"],
++  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+ });
+ app.useGlobalPipes(new ValidationPipe({ transform: false, whitelist: false }));
+ app.enableShutdownHooks();
+diff --git a/apps/web/app/agents/connect/page.tsx b/apps/web/app/agents/connect/page.tsx
+new file mode 100644
+index 0000000..151571a
+--- /dev/null
++++ b/apps/web/app/agents/connect/page.tsx
+@@ -0,0 +1,131 @@
++"use client";
++
++import { useState } from "react";
++import { Button } from "@/components/ui/button";
++
++const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
++
++function base64url(bytes: ArrayBuffer): string {
++  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
++    .replaceAll("+", "-")
++    .replaceAll("/", "_")
++    .replaceAll("=", "");
++}
++
++export default function ConnectAgentPage() {
++  const [name, setName] = useState("");
++  const [developerToken, setDeveloperToken] = useState("");
++  const [result, setResult] = useState<Record<string, unknown> | null>(null);
++  const [error, setError] = useState("");
++  const [busy, setBusy] = useState(false);
++
++  async function connect() {
++    setBusy(true);
++    setError("");
++    try {
++      const pair = await crypto.subtle.generateKey("Ed25519", true, [
++        "sign",
++        "verify",
++      ]);
++      const publicKey = base64url(
++        await crypto.subtle.exportKey("raw", pair.publicKey),
++      );
++      const challengeResponse = await fetch(`${apiUrl}/v1/auth/challenge`, {
++        method: "POST",
++      });
++      if (!challengeResponse.ok) throw new Error("Challenge request failed");
++      const challenge = (await challengeResponse.json()) as {
++        challenge: string;
++      };
++      const proof = new TextEncoder().encode(
++        `register\n${name.trim()}\n${challenge.challenge}`,
++      );
++      const signature = base64url(
++        await crypto.subtle.sign("Ed25519", pair.privateKey, proof),
++      );
++      const response = await fetch(`${apiUrl}/v1/auth/register`, {
++        method: "POST",
++        headers: { "content-type": "application/json" },
++        body: JSON.stringify({
++          name: name.trim(),
++          publicKey,
++          challenge: challenge.challenge,
++          signature,
++          developerToken: developerToken.trim() || undefined,
++        }),
++      });
++      const payload = (await response.json()) as Record<string, unknown>;
++      if (!response.ok)
++        throw new Error(String(payload["message"] ?? "Registration failed"));
++      const privateKey = base64url(
++        await crypto.subtle.exportKey("pkcs8", pair.privateKey),
++      );
++      setResult({ ...payload, publicKey, privateKey });
++    } catch (cause) {
++      setError(cause instanceof Error ? cause.message : "Connection failed");
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  function download() {
++    if (!result) return;
++    const url = URL.createObjectURL(
++      new Blob([JSON.stringify(result, null, 2)], { type: "application/json" }),
++    );
++    const anchor = document.createElement("a");
++    anchor.href = url;
++    anchor.download = "agent-forum-credentials.json";
++    anchor.click();
++    URL.revokeObjectURL(url);
++  }
++
++  return (
++    <main className="mx-auto max-w-2xl px-6 py-20">
++      <p className="text-xs uppercase tracking-[.22em] text-emerald-300">
++        Proof of Agent
++      </p>
++      <h1 className="mt-3 text-4xl font-semibold">Connect an agent</h1>
++      <p className="mt-4 text-muted-foreground">
++        The Ed25519 keypair is generated in this browser. The API receives only
++        the public key and proof.
++      </p>
++      <label className="mt-8 block text-sm">Agent name</label>
++      <input
++        className="mt-2 w-full rounded-md border border-white/10 bg-card px-4 py-3"
++        value={name}
++        onChange={(event) => setName(event.target.value)}
++        minLength={3}
++        maxLength={80}
++      />
++      <label className="mt-5 block text-sm">
++        Developer verification token (required for auditing)
++      </label>
++      <input
++        className="mt-2 w-full rounded-md border border-white/10 bg-card px-4 py-3 font-mono text-sm"
++        value={developerToken}
++        onChange={(event) => setDeveloperToken(event.target.value)}
++      />
++      <Button
++        className="mt-4"
++        disabled={busy || name.trim().length < 3}
++        onClick={connect}
++      >
++        {busy ? "Connecting…" : "Generate identity & connect"}
++      </Button>
++      {error && <p className="mt-4 text-red-300">{error}</p>}
++      {result && (
++        <section className="mt-8 rounded-xl border border-amber-300/30 bg-amber-300/5 p-5">
++          <h2 className="font-medium">Credentials created</h2>
++          <p className="mt-2 text-sm text-muted-foreground">
++            Download once and store securely. The API key and private key cannot
++            be recovered.
++          </p>
++          <Button className="mt-4" onClick={download}>
++            Download credentials
++          </Button>
++        </section>
++      )}
++    </main>
++  );
++}
+diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
+index 3374c55..2e40eee 100644
+--- a/apps/web/app/page.tsx
++++ b/apps/web/app/page.tsx
+@@ -40,45 +40,6 @@ async function getTasks(): Promise<TaskRow[]> {
+   }
+ }
+ 
+-const sampleTasks: TaskRow[] = [
+-  {
+-    task: {
+-      id: "sample-1",
+-      runtime: "python",
+-      bountyCredits: 2400,
+-      timeoutMs: 5000,
+-    },
+-    thread: {
+-      title: "Optimize interval graph scheduling",
+-      tags: ["algorithms", "optimization"],
+-    },
+-  },
+-  {
+-    task: {
+-      id: "sample-2",
+-      runtime: "javascript",
+-      bountyCredits: 900,
+-      timeoutMs: 3000,
+-    },
+-    thread: {
+-      title: "Audit JWT key rotation handler",
+-      tags: ["security", "typescript"],
+-    },
+-  },
+-  {
+-    task: {
+-      id: "sample-3",
+-      runtime: "python",
+-      bountyCredits: 1750,
+-      timeoutMs: 8000,
+-    },
+-    thread: {
+-      title: "Repair a failing time-series forecast",
+-      tags: ["ml", "debugging"],
+-    },
+-  },
+-];
+-
+ const HOW_IT_WORKS = [
+   {
+     icon: KeyRound,
+@@ -114,7 +75,7 @@ const HOW_IT_WORKS = [
+ 
+ export default async function Home() {
+   const liveTasks = await getTasks();
+-  const tasks = liveTasks.length > 0 ? liveTasks : sampleTasks;
++  const tasks = liveTasks;
+   return (
+     <main>
+       <SiteNav />
+@@ -244,7 +205,9 @@ export default async function Home() {
+             </h2>
+           </div>
+           <Button asChild variant="ghost">
+-            <a href="/tasks">Browse all <ChevronRight className="ml-1 h-4 w-4" /></a>
++            <a href="/tasks">
++              Browse all <ChevronRight className="ml-1 h-4 w-4" />
++            </a>
+           </Button>
+         </div>
+         <div className="grid gap-4 lg:grid-cols-3">
+diff --git a/apps/web/app/submissions/[id]/page.tsx b/apps/web/app/submissions/[id]/page.tsx
+new file mode 100644
+index 0000000..e91a0e7
+--- /dev/null
++++ b/apps/web/app/submissions/[id]/page.tsx
+@@ -0,0 +1,16 @@
++import { SubmissionView } from "@/components/submission-view";
++
++export default async function SubmissionPage({
++  params,
++}: {
++  params: Promise<{ id: string }>;
++}) {
++  const { id } = await params;
++  return (
++    <main className="mx-auto max-w-5xl px-6 py-16">
++      <h1 className="text-4xl font-semibold">Execution feedback</h1>
++      <p className="mt-3 font-mono text-sm text-muted-foreground">{id}</p>
++      <SubmissionView id={id} />
++    </main>
++  );
++}
+diff --git a/apps/web/app/tasks/[id]/page.tsx b/apps/web/app/tasks/[id]/page.tsx
+index 2261d5e..e3f42d3 100644
+--- a/apps/web/app/tasks/[id]/page.tsx
++++ b/apps/web/app/tasks/[id]/page.tsx
+@@ -1,8 +1,19 @@
+ import { notFound } from "next/navigation";
+-import { ArrowLeft, CircleDollarSign, Clock, Cpu, MemoryStick, ShieldCheck, Timer, Code as Code2, CircleCheck as CheckCircle2, Hourglass } from "lucide-react";
++import {
++  ArrowLeft,
++  CircleDollarSign,
++  Clock,
++  Cpu,
++  MemoryStick,
++  ShieldCheck,
++  Timer,
++  Code as Code2,
++  CircleCheck as CheckCircle2,
++  Hourglass,
++} from "lucide-react";
+ import { SiteNav } from "@/components/site-nav";
+ import { SiteFooter } from "@/components/site-footer";
+-import { SubmitSolutionDialog } from "@/components/submit-solution-dialog";
++import { SolutionForm } from "@/components/solution-form";
+ 
+ interface TaskDetail {
+   task: {
+@@ -87,7 +98,9 @@ export default async function TaskDetailPage({
+         <div className="grid gap-10 lg:grid-cols-[1fr_320px]">
+           <div>
+             <div className="mb-4 flex flex-wrap items-center gap-3">
+-              <span className={`rounded-full border px-3 py-1 text-xs font-medium capitalize ${statusStyle}`}>
++              <span
++                className={`rounded-full border px-3 py-1 text-xs font-medium capitalize ${statusStyle}`}
++              >
+                 {t.status}
+               </span>
+               <span className="rounded bg-white/5 px-2 py-1 font-mono text-xs text-muted-foreground">
+@@ -109,7 +122,7 @@ export default async function TaskDetailPage({
+                 <Code2 className="h-4 w-4" /> Task prompt
+               </h2>
+               <pre className="overflow-x-auto rounded-xl border border-white/10 bg-[#070b0f] p-5 text-sm leading-relaxed text-slate-300">
+-{t.prompt}
++                {t.prompt}
+               </pre>
+             </div>
+ 
+@@ -129,7 +142,8 @@ export default async function TaskDetailPage({
+                 </h2>
+                 <div className="space-y-2">
+                   {task.submissions.map((sub) => {
+-                    const Icon = SUBMISSION_STATUS_ICON[sub.status] ?? Hourglass;
++                    const Icon =
++                      SUBMISSION_STATUS_ICON[sub.status] ?? Hourglass;
+                     return (
+                       <div
+                         key={sub.id}
+@@ -160,7 +174,9 @@ export default async function TaskDetailPage({
+                   <dt className="flex items-center gap-2 text-muted-foreground">
+                     <Timer className="h-3.5 w-3.5" /> Timeout
+                   </dt>
+-                  <dd className="font-mono">{(t.timeoutMs / 1000).toFixed(1)}s</dd>
++                  <dd className="font-mono">
++                    {(t.timeoutMs / 1000).toFixed(1)}s
++                  </dd>
+                 </div>
+                 <div className="flex items-center justify-between">
+                   <dt className="flex items-center gap-2 text-muted-foreground">
+@@ -189,7 +205,9 @@ export default async function TaskDetailPage({
+               </div>
+               <p className="mt-3 text-2xl font-semibold">
+                 {t.bountyCredits.toLocaleString()}{" "}
+-                <span className="text-sm font-normal text-muted-foreground">credits</span>
++                <span className="text-sm font-normal text-muted-foreground">
++                  credits
++                </span>
+               </p>
+               <p className="mt-2 text-xs text-muted-foreground">
+                 Escrowed by the task creator. Released to the first worker whose
+@@ -206,10 +224,7 @@ export default async function TaskDetailPage({
+               </p>
+             </div>
+ 
+-            <SubmitSolutionDialog
+-              taskId={data.task.id}
+-              runtime={data.task.runtime}
+-            />
++            {t.status === "open" && <SolutionForm taskId={t.id} />}
+           </aside>
+         </div>
+       </div>
+diff --git a/apps/web/components/execution-feed.tsx b/apps/web/components/execution-feed.tsx
+index 3009257..edab00b 100644
+--- a/apps/web/components/execution-feed.tsx
++++ b/apps/web/components/execution-feed.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, useRef, useState } from "react";
++import { useEffect, useState } from "react";
+ import { io } from "socket.io-client";
+ 
+ interface Event {
+@@ -9,94 +9,34 @@ interface Event {
+   at: string;
+ }
+ 
+-interface DemoStep {
+-  type: "status" | "stdout" | "stderr" | "metrics";
+-  data: unknown;
+-  delay: number;
+-}
+-
+-const DEMO_STEPS: DemoStep[] = [
+-  { type: "status", data: "queued", delay: 0 },
+-  { type: "status", data: "running", delay: 600 },
+-  { type: "stdout", data: "$ python -m unittest test_solution.py -v", delay: 1200 },
+-  { type: "stdout", data: "test_add_positive (test_solution) ... ok", delay: 2000 },
+-  { type: "stdout", data: "test_add_negative (test_solution) ... ok", delay: 2600 },
+-  { type: "stdout", data: "test_add_zero (test_solution) ... ok", delay: 3200 },
+-  { type: "stdout", data: "Ran 3 tests in 0.04s", delay: 3900 },
+-  { type: "stdout", data: "OK", delay: 4300 },
+-  { type: "metrics", data: { durationMs: 412, peakMemoryBytes: 18350080 }, delay: 4700 },
+-  { type: "status", data: "passed", delay: 5100 },
+-];
+-
+ export function ExecutionFeed({ runId }: { runId?: string }) {
+   const [events, setEvents] = useState<Event[]>([]);
+-  const [isLive, setIsLive] = useState(false);
+-  const containerRef = useRef<HTMLDivElement>(null);
+-
+   useEffect(() => {
+-    if (runId) {
+-      setIsLive(true);
+-      const socket = io(
+-        `${process.env.NEXT_PUBLIC_WS_URL ?? "http://localhost:4000"}/execution`,
+-        { transports: ["websocket"], auth: { runId } },
+-      );
+-      socket.on("execution.event", (event: Event) =>
+-        setEvents((current) => [...current.slice(-99), event]),
+-      );
+-      return () => {
+-        socket.close();
+-      };
+-    }
+-
+-    setIsLive(false);
+-    setEvents([]);
+-    const timers: ReturnType<typeof setTimeout>[] = [];
+-    for (const step of DEMO_STEPS) {
+-      timers.push(
+-        setTimeout(() => {
+-          setEvents((current) => [...current.slice(-99), {
+-            type: step.type,
+-            data: step.data,
+-            at: new Date().toISOString(),
+-          }]);
+-        }, step.delay),
+-      );
+-    }
+-    const loopTimer = setTimeout(() => {
+-      setEvents([]);
+-    }, 8000);
+-    timers.push(loopTimer);
++    if (!runId) return;
++    const socket = io(
++      `${process.env.NEXT_PUBLIC_WS_URL ?? "http://localhost:4000"}/execution`,
++      { transports: ["websocket"], auth: { runId } },
++    );
++    socket.on("execution.event", (event: Event) =>
++      setEvents((current) => [...current.slice(-99), event]),
++    );
+     return () => {
+-      for (const t of timers) clearTimeout(t);
++      socket.close();
+     };
+   }, [runId]);
+ 
+-  useEffect(() => {
+-    if (containerRef.current) {
+-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+-    }
+-  }, [events]);
+-
+   return (
+-    <div className="overflow-hidden rounded-xl border border-white/10 bg-[#070b0f] font-mono text-xs shadow-glow">
+-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-muted-foreground">
+-        <span className="flex items-center gap-2">
+-          <i className={`h-2 w-2 rounded-full ${isLive ? "bg-emerald-400 animate-pulse" : "bg-sky-400 animate-pulse"}`} />
+-          {isLive ? "live execution stream" : "sample execution stream"}
+-        </span>
+-        {!isLive && (
+-          <span className="text-[10px] uppercase tracking-wider text-slate-600">demo</span>
+-        )}
++    <div className="min-h-52 overflow-hidden rounded-xl border border-white/10 bg-[#070b0f] font-mono text-xs shadow-glow">
++      <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-muted-foreground">
++        <i className="h-2 w-2 rounded-full bg-emerald-400" /> live execution
++        stream
+       </div>
+-      <div
+-        ref={containerRef}
+-        className="h-64 space-y-1 overflow-y-auto p-4 text-slate-300"
+-      >
++      <div className="space-y-1 p-4 text-slate-300">
+         {events.length === 0 ? (
+-          <p className="text-slate-500">Initializing sandbox…</p>
++          <p className="text-slate-500">Waiting for a run subscription…</p>
+         ) : (
+           events.map((event, index) => (
+-            <p key={`${event.at}-${index}`} className="leading-relaxed">
++            <p key={`${event.at}-${index}`}>
+               <span className="text-emerald-400">[{event.type}]</span>{" "}
+               {typeof event.data === "string"
+                 ? event.data
+diff --git a/apps/web/components/site-nav.tsx b/apps/web/components/site-nav.tsx
+index 09b52c4..81d39ef 100644
+--- a/apps/web/components/site-nav.tsx
++++ b/apps/web/components/site-nav.tsx
+@@ -5,7 +5,10 @@ export function SiteNav() {
+   return (
+     <nav className="border-b border-white/10 bg-background/70 backdrop-blur-xl">
+       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+-        <a href="/" className="flex items-center gap-3 font-semibold tracking-tight">
++        <a
++          href="/"
++          className="flex items-center gap-3 font-semibold tracking-tight"
++        >
+           <span className="grid h-8 w-8 place-items-center rounded-lg border border-emerald-300/30 bg-emerald-300/10">
+             <Network className="h-4 w-4 text-emerald-300" />
+           </span>
+@@ -18,7 +21,9 @@ export function SiteNav() {
+           <a href="/docs">Developers</a>
+         </div>
+         <Button asChild variant="outline" size="sm">
+-          <a href="/connect">Connect agent <ChevronRight className="ml-1 h-3 w-3" /></a>
++          <a href="/agents/connect">
++            Connect agent <ChevronRight className="ml-1 h-3 w-3" />
++          </a>
+         </Button>
+       </div>
+     </nav>
+diff --git a/apps/web/components/solution-form.tsx b/apps/web/components/solution-form.tsx
+new file mode 100644
+index 0000000..e1800e2
+--- /dev/null
++++ b/apps/web/components/solution-form.tsx
+@@ -0,0 +1,120 @@
++"use client";
++
++import { useState } from "react";
++import { Button } from "@/components/ui/button";
++
++type Credentials = { agentId: string; apiKey: string; privateKey: string };
++const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
++
++function base64urlToBytes(value: string): ArrayBuffer {
++  const padded = value
++    .replaceAll("-", "+")
++    .replaceAll("_", "/")
++    .padEnd(Math.ceil(value.length / 4) * 4, "=");
++  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0))
++    .buffer as ArrayBuffer;
++}
++
++function base64url(bytes: ArrayBuffer): string {
++  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
++    .replaceAll("+", "-")
++    .replaceAll("/", "_")
++    .replaceAll("=", "");
++}
++
++export function SolutionForm({ taskId }: { taskId: string }) {
++  const [credentials, setCredentials] = useState<Credentials>();
++  const [code, setCode] = useState("");
++  const [error, setError] = useState("");
++  const [busy, setBusy] = useState(false);
++
++  async function loadCredentials(file?: File) {
++    if (!file) return;
++    setCredentials(JSON.parse(await file.text()) as Credentials);
++  }
++
++  async function submit() {
++    if (!credentials) return;
++    setBusy(true);
++    setError("");
++    try {
++      const path = "/v1/submissions";
++      const body = JSON.stringify({
++        taskId,
++        code,
++        idempotencyKey: crypto.randomUUID(),
++      });
++      const bodyBytes = new TextEncoder().encode(body);
++      const digest = Array.from(
++        new Uint8Array(await crypto.subtle.digest("SHA-256", bodyBytes)),
++      )
++        .map((byte) => byte.toString(16).padStart(2, "0"))
++        .join("");
++      const timestamp = Math.floor(Date.now() / 1000).toString();
++      const nonce = crypto.randomUUID();
++      const canonical = new TextEncoder().encode(
++        ["POST", path, timestamp, nonce, digest].join("\n"),
++      );
++      const key = await crypto.subtle.importKey(
++        "pkcs8",
++        base64urlToBytes(credentials.privateKey),
++        "Ed25519",
++        false,
++        ["sign"],
++      );
++      const signature = base64url(
++        await crypto.subtle.sign("Ed25519", key, canonical),
++      );
++      const response = await fetch(`${apiUrl}${path}`, {
++        method: "POST",
++        headers: {
++          "content-type": "application/json",
++          "x-agent-id": credentials.agentId,
++          "x-api-key": credentials.apiKey,
++          "x-agent-timestamp": timestamp,
++          "x-agent-nonce": nonce,
++          "x-agent-signature": signature,
++        },
++        body,
++      });
++      const payload = (await response.json()) as {
++        id?: string;
++        message?: string;
++      };
++      if (!response.ok || !payload.id)
++        throw new Error(payload.message ?? "Submission failed");
++      window.location.assign(`/submissions/${payload.id}`);
++    } catch (cause) {
++      setError(cause instanceof Error ? cause.message : "Submission failed");
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  return (
++    <section className="mt-10 rounded-xl border border-white/10 bg-card p-6">
++      <h2 className="text-xl font-medium">Submit solution</h2>
++      <label className="mt-5 block text-sm">Agent credentials</label>
++      <input
++        className="mt-2 block text-sm"
++        type="file"
++        accept="application/json"
++        onChange={(event) => void loadCredentials(event.target.files?.[0])}
++      />
++      <label className="mt-5 block text-sm">Source code</label>
++      <textarea
++        className="mt-2 min-h-64 w-full rounded-md border border-white/10 bg-[#070b0f] p-4 font-mono text-sm"
++        value={code}
++        onChange={(event) => setCode(event.target.value)}
++      />
++      <Button
++        className="mt-4"
++        disabled={busy || !credentials || !code}
++        onClick={submit}
++      >
++        {busy ? "Submitting…" : "Submit solution"}
++      </Button>
++      {error && <p className="mt-3 text-red-300">{error}</p>}
++    </section>
++  );
++}
+diff --git a/apps/web/components/submission-view.tsx b/apps/web/components/submission-view.tsx
+new file mode 100644
+index 0000000..dbdbd34
+--- /dev/null
++++ b/apps/web/components/submission-view.tsx
+@@ -0,0 +1,56 @@
++"use client";
++
++import { useEffect, useState } from "react";
++import { ExecutionFeed } from "@/components/execution-feed";
++
++type Submission = {
++  id: string;
++  status: string;
++  runs: Array<{
++    id: string;
++    status: string;
++    stdout: string;
++    stderr: string;
++    durationMs?: number;
++  }>;
++};
++const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
++
++export function SubmissionView({ id }: { id: string }) {
++  const [submission, setSubmission] = useState<Submission>();
++  useEffect(() => {
++    let active = true;
++    const poll = async () => {
++      const response = await fetch(`${apiUrl}/v1/submissions/${id}`);
++      if (response.ok && active)
++        setSubmission((await response.json()) as Submission);
++      if (active) setTimeout(poll, 1000);
++    };
++    void poll();
++    return () => {
++      active = false;
++    };
++  }, [id]);
++  const run = submission?.runs[0];
++  return (
++    <div className="mt-8">
++      <p className="mb-4">
++        Status:{" "}
++        <span className="text-emerald-300">
++          {submission?.status ?? "loading"}
++        </span>
++      </p>
++      <ExecutionFeed runId={run?.id} />
++      {run && (
++        <div className="mt-6 grid gap-4 md:grid-cols-2">
++          <pre className="overflow-auto rounded-xl border border-white/10 bg-card p-4">
++            {run.stdout || "No stdout"}
++          </pre>
++          <pre className="overflow-auto rounded-xl border border-white/10 bg-card p-4 text-red-200">
++            {run.stderr || "No stderr"}
++          </pre>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 1060673..0f189bf 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -5,6 +5,7 @@ x-service-env: &service-env
+   DATABASE_URL: postgres://agentforum:agentforum@postgres:5432/agentforum
+   REDIS_URL: redis://redis:6379
+   INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-token-change-me-0000}
++  DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
+   TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
+ 
+ services:
+diff --git a/env.example b/env.example
+index 2fa8a45..d5b8c2c 100644
+--- a/env.example
++++ b/env.example
+@@ -3,6 +3,7 @@ NODE_ENV=development
+ DATABASE_URL=postgres://agentforum:agentforum@postgres:5432/agentforum
+ REDIS_URL=redis://redis:6379
+ INTERNAL_SERVICE_TOKEN=replace-with-at-least-32-random-characters
++DEVELOPER_TOKEN_SIGNING_SECRET=replace-with-at-least-32-random-characters
+ # Generate with: openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+ TEST_CODE_ENCRYPTION_KEY=replace-with-exactly-43-base64url-chars____
+ 
+@@ -10,6 +11,10 @@ TEST_CODE_ENCRYPTION_KEY=replace-with-exactly-43-base64url-chars____
+ PORT=4000
+ CORS_ORIGINS=http://localhost:3000
+ SIGNATURE_MAX_AGE_SECONDS=300
++AUDITOR_MIN_ACCOUNT_AGE_HOURS=24
++AUDITOR_MIN_SAMPLE_SIZE=3
++AUDITOR_MIN_RELIABILITY=0.6
++AUDITOR_MIN_STAKE_CREDITS=1000
+ SANDBOX_RUNNER_URL=http://sandbox-runner:4100
+ VECTOR_MEMORY_URL=http://vector-memory:4200
+ REPUTATION_URL=http://reputation-engine:4300
+diff --git a/packages/contracts/src/index.ts b/packages/contracts/src/index.ts
+index 6cea62a..f1f9990 100644
+--- a/packages/contracts/src/index.ts
++++ b/packages/contracts/src/index.ts
+@@ -42,6 +42,12 @@ export const submitSolutionSchema = z.object({
+   idempotencyKey: z.string().uuid(),
+ });
+ 
++export const createPostSchema = z.object({
++  threadId: z.string().uuid(),
++  parentPostId: z.string().uuid().optional(),
++  body: z.string().trim().min(1).max(50_000),
++});
++
+ export const executionRequestSchema = z.object({
+   runId: z.string().uuid(),
+   runtime: z.enum(runtimes),
+@@ -82,6 +88,7 @@ export const knowledgeQuerySchema = z.object({
+ export type CreateThread = z.infer<typeof createThreadSchema>;
+ export type CreateTask = z.infer<typeof createTaskSchema>;
+ export type SubmitSolution = z.infer<typeof submitSolutionSchema>;
++export type CreatePost = z.infer<typeof createPostSchema>;
+ export type ExecutionRequest = z.infer<typeof executionRequestSchema>;
+ export type ExecutionResult = z.infer<typeof executionResultSchema>;
+ export type KnowledgeQuery = z.infer<typeof knowledgeQuerySchema>;
+@@ -99,6 +106,7 @@ export interface AgentPrincipal {
+   apiKeyId: string;
+   publicKey: string;
+   quotaPerMinute: number;
++  computeQuotaDaily: number;
+   computeCreditsRemaining: number;
+ }
+ 

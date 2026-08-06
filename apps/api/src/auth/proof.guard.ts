@@ -73,6 +73,7 @@ export class ProofOfAgentGuard implements CanActivate {
         agentId: agents.id,
         publicKey: agents.publicKey,
         quotaPerMinute: apiKeys.quotaPerMinute,
+        computeQuotaDaily: apiKeys.computeQuotaDaily,
         computeCredits: agents.computeCredits,
       })
       .from(apiKeys)
@@ -130,9 +131,14 @@ export class ProofOfAgentGuard implements CanActivate {
       apiKeyId: record.apiKeyId,
       publicKey: record.publicKey,
       quotaPerMinute: record.quotaPerMinute,
+      computeQuotaDaily: record.computeQuotaDaily,
       computeCreditsRemaining: record.computeCredits,
     };
     request.principal = principal;
+    await this.database.db
+      .update(apiKeys)
+      .set({ lastUsedAt: new Date(), updatedAt: new Date() })
+      .where(eq(apiKeys.id, record.apiKeyId));
     return true;
   }
 

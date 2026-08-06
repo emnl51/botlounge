@@ -1,8 +1,19 @@
 import { notFound } from "next/navigation";
-import { ArrowLeft, CircleDollarSign, Clock, Cpu, MemoryStick, ShieldCheck, Timer, Code as Code2, CircleCheck as CheckCircle2, Hourglass } from "lucide-react";
+import {
+  ArrowLeft,
+  CircleDollarSign,
+  Clock,
+  Cpu,
+  MemoryStick,
+  ShieldCheck,
+  Timer,
+  Code as Code2,
+  CircleCheck as CheckCircle2,
+  Hourglass,
+} from "lucide-react";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
-import { SubmitSolutionDialog } from "@/components/submit-solution-dialog";
+import { SolutionForm } from "@/components/solution-form";
 
 interface TaskDetail {
   task: {
@@ -87,7 +98,9 @@ export default async function TaskDetailPage({
         <div className="grid gap-10 lg:grid-cols-[1fr_320px]">
           <div>
             <div className="mb-4 flex flex-wrap items-center gap-3">
-              <span className={`rounded-full border px-3 py-1 text-xs font-medium capitalize ${statusStyle}`}>
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-medium capitalize ${statusStyle}`}
+              >
                 {t.status}
               </span>
               <span className="rounded bg-white/5 px-2 py-1 font-mono text-xs text-muted-foreground">
@@ -109,7 +122,7 @@ export default async function TaskDetailPage({
                 <Code2 className="h-4 w-4" /> Task prompt
               </h2>
               <pre className="overflow-x-auto rounded-xl border border-white/10 bg-[#070b0f] p-5 text-sm leading-relaxed text-slate-300">
-{t.prompt}
+                {t.prompt}
               </pre>
             </div>
 
@@ -129,7 +142,8 @@ export default async function TaskDetailPage({
                 </h2>
                 <div className="space-y-2">
                   {task.submissions.map((sub) => {
-                    const Icon = SUBMISSION_STATUS_ICON[sub.status] ?? Hourglass;
+                    const Icon =
+                      SUBMISSION_STATUS_ICON[sub.status] ?? Hourglass;
                     return (
                       <div
                         key={sub.id}
@@ -160,7 +174,9 @@ export default async function TaskDetailPage({
                   <dt className="flex items-center gap-2 text-muted-foreground">
                     <Timer className="h-3.5 w-3.5" /> Timeout
                   </dt>
-                  <dd className="font-mono">{(t.timeoutMs / 1000).toFixed(1)}s</dd>
+                  <dd className="font-mono">
+                    {(t.timeoutMs / 1000).toFixed(1)}s
+                  </dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="flex items-center gap-2 text-muted-foreground">
@@ -189,7 +205,9 @@ export default async function TaskDetailPage({
               </div>
               <p className="mt-3 text-2xl font-semibold">
                 {t.bountyCredits.toLocaleString()}{" "}
-                <span className="text-sm font-normal text-muted-foreground">credits</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  credits
+                </span>
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 Escrowed by the task creator. Released to the first worker whose
@@ -206,10 +224,7 @@ export default async function TaskDetailPage({
               </p>
             </div>
 
-            <SubmitSolutionDialog
-              taskId={data.task.id}
-              runtime={data.task.runtime}
-            />
+            {t.status === "open" && <SolutionForm taskId={t.id} />}
           </aside>
         </div>
       </div>

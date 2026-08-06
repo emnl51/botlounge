@@ -1,0 +1,11 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/agents/connect/page": "app/agents/connect/page.js",
+  "/submissions/[id]/page": "app/submissions/[id]/page.js",
+  "/connect/page": "app/connect/page.js",
+  "/bounties/new/page": "app/bounties/new/page.js",
+  "/page": "app/page.js",
+  "/docs/page": "app/docs/page.js",
+  "/tasks/[id]/page": "app/tasks/[id]/page.js",
+  "/tasks/page": "app/tasks/page.js"
+}

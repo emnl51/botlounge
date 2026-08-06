@@ -1,0 +1,182 @@
+name: agent-forum-network
+
+x-service-env: &service-env
+  NODE_ENV: ${NODE_ENV:-development}
+  DATABASE_URL: postgres://agentforum:agentforum@postgres:5432/agentforum
+  REDIS_URL: redis://redis:6379
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-token-change-me-0000}
+  TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
+
+services:
+  postgres:
+    image: postgres:16.8-alpine3.21
+    environment:
+      POSTGRES_USER: agentforum
+      POSTGRES_PASSWORD: agentforum
+      POSTGRES_DB: agentforum
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentforum -d agentforum"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+
+  redis:
+    image: redis:7.4.2-alpine3.21
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+
+  docker-engine:
+    image: docker:27.5.1-dind-alpine3.21
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      [
+        "dockerd",
+        "--host=tcp://0.0.0.0:2375",
+        "--host=unix:///var/run/docker.sock",
+        "--icc=false",
+        "--userland-proxy=false",
+      ]
+    volumes:
+      - docker-data:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [sandbox-control]
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: build
+    environment: *service-env
+    command: ["pnpm", "--filter", "@agent-forum/database", "migrate"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [data]
+
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: services/sandbox-runner/Dockerfile
+    environment:
+      <<: *service-env
+      PORT: 4100
+      DOCKER_HOST: tcp://docker-engine:2375
+      SANDBOX_PYTHON_IMAGE: ${SANDBOX_PYTHON_IMAGE:-python:3.12.10-alpine3.21}
+      SANDBOX_NODE_IMAGE: ${SANDBOX_NODE_IMAGE:-node:22.14.0-alpine3.21}
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
+    depends_on:
+      docker-engine: { condition: service_healthy }
+    networks: [backend, sandbox-control]
+    restart: unless-stopped
+
+  vector-memory:
+    build:
+      context: .
+      dockerfile: services/vector-memory/Dockerfile
+    environment:
+      <<: *service-env
+      PORT: 4200
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-resolved_threads_v1}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+    depends_on:
+      qdrant: { condition: service_healthy }
+    networks: [backend, data]
+    restart: unless-stopped
+
+  reputation-engine:
+    build:
+      context: .
+      dockerfile: services/reputation-engine/Dockerfile
+    environment:
+      <<: *service-env
+      PORT: 4300
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [backend, data]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      <<: *service-env
+      PORT: 4000
+      CORS_ORIGINS: http://localhost:3000
+      SANDBOX_RUNNER_URL: http://sandbox-runner:4100
+      VECTOR_MEMORY_URL: http://vector-memory:4200
+      REPUTATION_URL: http://reputation-engine:4300
+    ports: ["4000:4000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      sandbox-runner: { condition: service_started }
+      vector-memory: { condition: service_started }
+    networks: [frontend, backend, data]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      API_INTERNAL_URL: http://api:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_WS_URL: http://localhost:4000
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_started }
+    networks: [frontend]
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  docker-data:
+
+networks:
+  frontend:
+  backend:
+    internal: true
+  data:
+    internal: true
+  sandbox-control:
+    internal: true

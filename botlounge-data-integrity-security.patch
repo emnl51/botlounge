@@ -1,0 +1,448 @@
+diff --git a/apps/api/src/config.ts b/apps/api/src/config.ts
+index d632425..4053ef5 100644
+--- a/apps/api/src/config.ts
++++ b/apps/api/src/config.ts
+@@ -10,7 +10,9 @@ const schema = z.object({
+   SANDBOX_RUNNER_URL: z.string().url().default("http://sandbox-runner:4100"),
+   VECTOR_MEMORY_URL: z.string().url().default("http://vector-memory:4200"),
+   REPUTATION_URL: z.string().url().default("http://reputation-engine:4300"),
+-  INTERNAL_SERVICE_TOKEN: z.string().min(32),
++  SANDBOX_SERVICE_TOKEN: z.string().min(32),
++  VECTOR_SERVICE_TOKEN: z.string().min(32),
++  REPUTATION_SERVICE_TOKEN: z.string().min(32),
+   DEVELOPER_TOKEN_SIGNING_SECRET: z.string().min(32),
+   TEST_CODE_ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+   SIGNATURE_MAX_AGE_SECONDS: z.coerce
+diff --git a/apps/api/src/execution/execution.worker.ts b/apps/api/src/execution/execution.worker.ts
+index 2712ae0..a6f4f9e 100644
+--- a/apps/api/src/execution/execution.worker.ts
++++ b/apps/api/src/execution/execution.worker.ts
+@@ -60,7 +60,7 @@ export class ExecutionWorker implements OnModuleInit, OnApplicationShutdown {
+             method: "POST",
+             headers: {
+               "content-type": "application/json",
+-              authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
++              authorization: `Bearer ${this.config.SANDBOX_SERVICE_TOKEN}`,
+             },
+             body: JSON.stringify({
+               runId: run.id,
+diff --git a/apps/api/src/forum/forum.service.ts b/apps/api/src/forum/forum.service.ts
+index 8cdce55..5be46f0 100644
+--- a/apps/api/src/forum/forum.service.ts
++++ b/apps/api/src/forum/forum.service.ts
+@@ -1,6 +1,8 @@
+ import {
+   BadRequestException,
+   ConflictException,
++  HttpException,
++  HttpStatus,
+   Inject,
+   Injectable,
+   NotFoundException,
+@@ -26,9 +28,10 @@ import {
+ } from "@agent-forum/database";
+ import { and, asc, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
+ import { Queue } from "bullmq";
++import type { Redis } from "ioredis";
+ import { createHash } from "node:crypto";
+ import type { AppConfig } from "../config.js";
+-import { CONFIG, DATABASE } from "../database.provider.js";
++import { CONFIG, DATABASE, REDIS } from "../database.provider.js";
+ import { encryptTestCode } from "../crypto-vault.js";
+ 
+ export const EXECUTION_QUEUE = Symbol("EXECUTION_QUEUE");
+@@ -41,6 +44,7 @@ export class ForumService {
+       typeof import("@agent-forum/database").createDatabase
+     >,
+     @Inject(CONFIG) private readonly config: AppConfig,
++    @Inject(REDIS) private readonly redis: Redis,
+     @Inject(EXECUTION_QUEUE) private readonly executionQueue: Queue,
+   ) {}
+ 
+@@ -289,40 +293,76 @@ export class ForumService {
+       ),
+     );
+ 
+-    const submission = await this.database.db.transaction(async (tx) => {
+-      const charged = await tx
+-        .update(agents)
+-        .set({ computeCredits: sql`${agents.computeCredits} - ${computeCost}` })
+-        .where(
+-          and(
+-            eq(agents.id, principal.agentId),
+-            sql`${agents.computeCredits} >= ${computeCost}`,
+-          ),
+-        )
+-        .returning({ id: agents.id });
+-      if (charged.length === 0)
+-        throw new BadRequestException("Insufficient compute credits");
+-      const [created] = await tx
+-        .insert(submissions)
+-        .values({
+-          taskId: input.taskId,
++    const quotaKey = `quota:compute:${principal.apiKeyId}:${new Date()
++      .toISOString()
++      .slice(0, 10)}`;
++    const reserved = Number(
++      await this.redis.eval(
++        `
++local current = tonumber(redis.call('GET', KEYS[1]) or '0')
++local cost = tonumber(ARGV[1])
++local limit = tonumber(ARGV[2])
++if current + cost > limit then return -1 end
++local total = redis.call('INCRBY', KEYS[1], cost)
++if current == 0 then redis.call('EXPIRE', KEYS[1], 172800) end
++return total
++`,
++        1,
++        quotaKey,
++        computeCost,
++        principal.computeQuotaDaily,
++      ),
++    );
++    if (reserved < 0)
++      throw new HttpException(
++        "API key daily compute quota exceeded",
++        HttpStatus.TOO_MANY_REQUESTS,
++      );
++
++    let submission: typeof submissions.$inferSelect;
++    try {
++      submission = await this.database.db.transaction(async (tx) => {
++        const charged = await tx
++          .update(agents)
++          .set({
++            computeCredits: sql`${agents.computeCredits} - ${computeCost}`,
++          })
++          .where(
++            and(
++              eq(agents.id, principal.agentId),
++              sql`${agents.computeCredits} >= ${computeCost}`,
++            ),
++          )
++          .returning({ id: agents.id });
++        if (charged.length === 0)
++          throw new BadRequestException("Insufficient compute credits");
++        const [created] = await tx
++          .insert(submissions)
++          .values({
++            taskId: input.taskId,
++            agentId: principal.agentId,
++            idempotencyKey: input.idempotencyKey,
++            sourceCode: input.code,
++            sourceDigest: createHash("sha256").update(input.code).digest("hex"),
++          })
++          .onConflictDoNothing()
++          .returning();
++        if (!created)
++          throw new ConflictException("Idempotency key already used");
++        await tx.insert(ledgerEntries).values({
+           agentId: principal.agentId,
+-          idempotencyKey: input.idempotencyKey,
+-          sourceCode: input.code,
+-          sourceDigest: createHash("sha256").update(input.code).digest("hex"),
+-        })
+-        .onConflictDoNothing()
+-        .returning();
+-      if (!created) throw new ConflictException("Idempotency key already used");
+-      await tx.insert(ledgerEntries).values({
+-        agentId: principal.agentId,
+-        taskId: input.taskId,
+-        kind: "compute_debit",
+-        amount: -computeCost,
+-        idempotencyKey: `compute:${created.id}`,
++          taskId: input.taskId,
++          kind: "compute_debit",
++          amount: -computeCost,
++          idempotencyKey: `compute:${created.id}`,
++          metadata: { apiKeyId: principal.apiKeyId, computeCost },
++        });
++        return created;
+       });
+-      return created;
+-    });
++    } catch (error) {
++      await this.redis.decrby(quotaKey, computeCost);
++      throw error;
++    }
+ 
+     await this.executionQueue.add(
+       "execute-submission",
+diff --git a/apps/api/src/knowledge.controller.ts b/apps/api/src/knowledge.controller.ts
+index 8f1e1fa..e499ba4 100644
+--- a/apps/api/src/knowledge.controller.ts
++++ b/apps/api/src/knowledge.controller.ts
+@@ -22,7 +22,7 @@ export class KnowledgeController {
+       method: "POST",
+       headers: {
+         "content-type": "application/json",
+-        authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
++        authorization: `Bearer ${this.config.VECTOR_SERVICE_TOKEN}`,
+       },
+       body: JSON.stringify(input),
+       signal: AbortSignal.timeout(5_000),
+diff --git a/apps/api/src/outbox.worker.ts b/apps/api/src/outbox.worker.ts
+index d615a13..0b3d55d 100644
+--- a/apps/api/src/outbox.worker.ts
++++ b/apps/api/src/outbox.worker.ts
+@@ -7,12 +7,14 @@ import {
+ } from "@nestjs/common";
+ import {
+   executionRuns,
++  knowledgeChunks,
+   outboxEvents,
+   posts,
+   submissions,
+   threads,
+ } from "@agent-forum/database";
+ import { asc, eq, isNull, lte, sql } from "drizzle-orm";
++import { z } from "zod";
+ import type { AppConfig } from "./config.js";
+ import { CONFIG, DATABASE } from "./database.provider.js";
+ 
+@@ -110,7 +112,7 @@ export class OutboxWorker implements OnModuleInit, OnApplicationShutdown {
+         {
+           method: "POST",
+           headers: {
+-            authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
++            authorization: `Bearer ${this.config.REPUTATION_SERVICE_TOKEN}`,
+           },
+           signal: AbortSignal.timeout(10_000),
+         },
+@@ -160,7 +162,7 @@ export class OutboxWorker implements OnModuleInit, OnApplicationShutdown {
+       method: "POST",
+       headers: {
+         "content-type": "application/json",
+-        authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
++        authorization: `Bearer ${this.config.VECTOR_SERVICE_TOKEN}`,
+       },
+       body: JSON.stringify({
+         threadId,
+@@ -173,5 +175,36 @@ export class OutboxWorker implements OnModuleInit, OnApplicationShutdown {
+     });
+     if (!response.ok)
+       throw new Error(`Vector memory returned ${response.status}`);
++    const indexed = z
++      .object({
++        chunks: z.array(
++          z.object({
++            ordinal: z.number().int().nonnegative(),
++            content: z.string(),
++            contentHash: z.string().length(64),
++            tokenCount: z.number().int().nonnegative(),
++            qdrantPointId: z.string().uuid(),
++            metadata: z.record(z.string(), z.unknown()),
++          }),
++        ),
++      })
++      .parse(await response.json());
++    await this.database.db.transaction(async (tx) => {
++      await tx
++        .delete(knowledgeChunks)
++        .where(eq(knowledgeChunks.threadId, threadId));
++      if (indexed.chunks.length > 0)
++        await tx.insert(knowledgeChunks).values(
++          indexed.chunks.map((chunk) => ({
++            threadId,
++            qdrantPointId: chunk.qdrantPointId,
++            ordinal: chunk.ordinal,
++            content: chunk.content,
++            contentHash: chunk.contentHash,
++            tokenCount: chunk.tokenCount,
++            metadata: chunk.metadata,
++          })),
++        );
++    });
+   }
+ }
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 0f189bf..9851c8d 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -4,9 +4,6 @@ x-service-env: &service-env
+   NODE_ENV: ${NODE_ENV:-development}
+   DATABASE_URL: postgres://agentforum:agentforum@postgres:5432/agentforum
+   REDIS_URL: redis://redis:6379
+-  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-token-change-me-0000}
+-  DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
+-  TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
+ 
+ services:
+   postgres:
+@@ -94,6 +91,7 @@ services:
+     environment:
+       <<: *service-env
+       PORT: 4100
++      SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-local-sandbox-token-change-me-000000}
+       DOCKER_HOST: tcp://docker-engine:2375
+       SANDBOX_PYTHON_IMAGE: ${SANDBOX_PYTHON_IMAGE:-python:3.12.10-alpine3.21}
+       SANDBOX_NODE_IMAGE: ${SANDBOX_NODE_IMAGE:-node:22.14.0-alpine3.21}
+@@ -110,6 +108,7 @@ services:
+     environment:
+       <<: *service-env
+       PORT: 4200
++      VECTOR_SERVICE_TOKEN: ${VECTOR_SERVICE_TOKEN:-local-vector-token-change-me-00000000}
+       QDRANT_URL: http://qdrant:6333
+       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-resolved_threads_v1}
+       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+@@ -128,6 +127,7 @@ services:
+     environment:
+       <<: *service-env
+       PORT: 4300
++      REPUTATION_SERVICE_TOKEN: ${REPUTATION_SERVICE_TOKEN:-local-reputation-token-change-me-0000}
+     depends_on:
+       migrate: { condition: service_completed_successfully }
+     networks: [backend, data]
+@@ -140,6 +140,11 @@ services:
+     environment:
+       <<: *service-env
+       PORT: 4000
++      SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-local-sandbox-token-change-me-000000}
++      VECTOR_SERVICE_TOKEN: ${VECTOR_SERVICE_TOKEN:-local-vector-token-change-me-00000000}
++      REPUTATION_SERVICE_TOKEN: ${REPUTATION_SERVICE_TOKEN:-local-reputation-token-change-me-0000}
++      DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
++      TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
+       CORS_ORIGINS: http://localhost:3000
+       SANDBOX_RUNNER_URL: http://sandbox-runner:4100
+       VECTOR_MEMORY_URL: http://vector-memory:4200
+diff --git a/env.example b/env.example
+index d5b8c2c..5409e36 100644
+--- a/env.example
++++ b/env.example
+@@ -2,7 +2,9 @@
+ NODE_ENV=development
+ DATABASE_URL=postgres://agentforum:agentforum@postgres:5432/agentforum
+ REDIS_URL=redis://redis:6379
+-INTERNAL_SERVICE_TOKEN=replace-with-at-least-32-random-characters
++SANDBOX_SERVICE_TOKEN=replace-with-at-least-32-random-characters
++VECTOR_SERVICE_TOKEN=replace-with-at-least-32-random-characters
++REPUTATION_SERVICE_TOKEN=replace-with-at-least-32-random-characters
+ DEVELOPER_TOKEN_SIGNING_SECRET=replace-with-at-least-32-random-characters
+ # Generate with: openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+ TEST_CODE_ENCRYPTION_KEY=replace-with-exactly-43-base64url-chars____
+diff --git a/packages/database/migrations/0001_knowledge_chunk_scope.sql b/packages/database/migrations/0001_knowledge_chunk_scope.sql
+new file mode 100644
+index 0000000..a46f517
+--- /dev/null
++++ b/packages/database/migrations/0001_knowledge_chunk_scope.sql
+@@ -0,0 +1,3 @@
++DROP INDEX IF EXISTS "knowledge_content_hash_uq";
++CREATE UNIQUE INDEX "knowledge_thread_content_hash_uq"
++  ON "knowledge_chunks" ("thread_id", "content_hash");
+diff --git a/packages/database/migrations/meta/_journal.json b/packages/database/migrations/meta/_journal.json
+index c4344d4..12a856f 100644
+--- a/packages/database/migrations/meta/_journal.json
++++ b/packages/database/migrations/meta/_journal.json
+@@ -8,6 +8,13 @@
+       "when": 1786017600000,
+       "tag": "0000_initial",
+       "breakpoints": true
++    },
++    {
++      "idx": 1,
++      "version": "7",
++      "when": 1786027200000,
++      "tag": "0001_knowledge_chunk_scope",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/packages/database/src/schema.ts b/packages/database/src/schema.ts
+index 60b10f0..cf32da7 100644
+--- a/packages/database/src/schema.ts
++++ b/packages/database/src/schema.ts
+@@ -277,7 +277,10 @@ export const knowledgeChunks = pgTable(
+       table.threadId,
+       table.ordinal,
+     ),
+-    uniqueIndex("knowledge_content_hash_uq").on(table.contentHash),
++    uniqueIndex("knowledge_thread_content_hash_uq").on(
++      table.threadId,
++      table.contentHash,
++    ),
+   ],
+ );
+ 
+diff --git a/services/reputation-engine/src/server.ts b/services/reputation-engine/src/server.ts
+index ba55e34..de425b5 100644
+--- a/services/reputation-engine/src/server.ts
++++ b/services/reputation-engine/src/server.ts
+@@ -9,7 +9,7 @@ const env = z
+   .object({
+     PORT: z.coerce.number().default(4300),
+     DATABASE_URL: z.string().startsWith("postgres://"),
+-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
++    REPUTATION_SERVICE_TOKEN: z.string().min(32),
+     DEFAULT_RUNTIME_TARGET_MS: z.coerce.number().positive().default(1_000),
+   })
+   .parse(process.env);
+@@ -18,7 +18,7 @@ const app = Fastify({ logger: true });
+ 
+ app.addHook("onRequest", async (request, reply) => {
+   if (request.url === "/healthz") return;
+-  const expected = Buffer.from(`Bearer ${env.INTERNAL_SERVICE_TOKEN}`);
++  const expected = Buffer.from(`Bearer ${env.REPUTATION_SERVICE_TOKEN}`);
+   const actual = Buffer.from(request.headers.authorization ?? "");
+   if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+     await reply.code(401).send({ error: "unauthorized" });
+diff --git a/services/sandbox-runner/src/server.ts b/services/sandbox-runner/src/server.ts
+index f74ebfe..dc81868 100644
+--- a/services/sandbox-runner/src/server.ts
++++ b/services/sandbox-runner/src/server.ts
+@@ -8,7 +8,7 @@ import { DockerSandboxRunner } from "./runner.js";
+ const env = z
+   .object({
+     PORT: z.coerce.number().default(4100),
+-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
++    SANDBOX_SERVICE_TOKEN: z.string().min(32),
+     DOCKER_HOST: z.string().default("/var/run/docker.sock"),
+     SANDBOX_PYTHON_IMAGE: z.string().default("python:3.12.10-alpine3.21"),
+     SANDBOX_NODE_IMAGE: z.string().default("node:22.14.0-alpine3.21"),
+@@ -53,7 +53,7 @@ const app = Fastify({
+ 
+ app.addHook("onRequest", async (request, reply) => {
+   if (request.url === "/healthz") return;
+-  const expected = Buffer.from(`Bearer ${env.INTERNAL_SERVICE_TOKEN}`);
++  const expected = Buffer.from(`Bearer ${env.SANDBOX_SERVICE_TOKEN}`);
+   const actual = Buffer.from(request.headers.authorization ?? "");
+   if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+     await reply.code(401).send({ error: "unauthorized" });
+diff --git a/services/vector-memory/src/server.ts b/services/vector-memory/src/server.ts
+index e98acf0..bf0dc01 100644
+--- a/services/vector-memory/src/server.ts
++++ b/services/vector-memory/src/server.ts
+@@ -16,7 +16,7 @@ const env = z
+       .enum(["development", "test", "production"])
+       .default("development"),
+     PORT: z.coerce.number().default(4200),
+-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
++    VECTOR_SERVICE_TOKEN: z.string().min(32),
+     QDRANT_URL: z.string().url().default("http://qdrant:6333"),
+     QDRANT_API_KEY: z.string().optional(),
+     QDRANT_COLLECTION: z.string().default("resolved_threads_v1"),
+@@ -64,7 +64,7 @@ function stablePointId(threadId: string, contentHash: string): string {
+ 
+ app.addHook("onRequest", async (request, reply) => {
+   if (request.url === "/healthz") return;
+-  const expected = Buffer.from(`Bearer ${env.INTERNAL_SERVICE_TOKEN}`);
++  const expected = Buffer.from(`Bearer ${env.VECTOR_SERVICE_TOKEN}`);
+   const actual = Buffer.from(request.headers.authorization ?? "");
+   if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+     await reply.code(401).send({ error: "unauthorized" });
+@@ -125,7 +125,15 @@ app.post("/v1/index", async (request, reply) => {
+   });
+   return {
+     indexed: chunks.length,
+-    hashes: chunks.map((chunk) => chunk.contentHash),
++    chunks: chunks.map((chunk) => ({
++      ...chunk,
++      qdrantPointId: stablePointId(parsed.data.threadId, chunk.contentHash),
++      metadata: {
++        title: parsed.data.title,
++        tags: parsed.data.tags,
++        resolvedAt: parsed.data.resolvedAt,
++      },
++    })),
+   };
+ });
+ 

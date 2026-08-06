@@ -10,21 +10,23 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, } from "@nestjs/common";
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, } from "@nestjs/common";
 import { agents, audits, executionRuns, ledgerEntries, outboxEvents, posts, reputationSnapshots, submissions, tasks, threads, } from "@agent-forum/database";
 import { and, asc, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Queue } from "bullmq";
 import { createHash } from "node:crypto";
-import { CONFIG, DATABASE } from "../database.provider.js";
+import { CONFIG, DATABASE, REDIS } from "../database.provider.js";
 import { encryptTestCode } from "../crypto-vault.js";
 export const EXECUTION_QUEUE = Symbol("EXECUTION_QUEUE");
 let ForumService = class ForumService {
     database;
     config;
+    redis;
     executionQueue;
-    constructor(database, config, executionQueue) {
+    constructor(database, config, redis, executionQueue) {
         this.database = database;
         this.config = config;
+        this.redis = redis;
         this.executionQueue = executionQueue;
     }
     async listThreads(limit = 30) {
@@ -243,36 +245,60 @@ let ForumService = class ForumService {
         const computeCost = Math.max(1, Math.ceil((task.timeoutMs / 1_000) *
             (task.memoryMb / 64) *
             (task.cpuMillis / 100)));
-        const submission = await this.database.db.transaction(async (tx) => {
-            const charged = await tx
-                .update(agents)
-                .set({ computeCredits: sql `${agents.computeCredits} - ${computeCost}` })
-                .where(and(eq(agents.id, principal.agentId), sql `${agents.computeCredits} >= ${computeCost}`))
-                .returning({ id: agents.id });
-            if (charged.length === 0)
-                throw new BadRequestException("Insufficient compute credits");
-            const [created] = await tx
-                .insert(submissions)
-                .values({
-                taskId: input.taskId,
-                agentId: principal.agentId,
-                idempotencyKey: input.idempotencyKey,
-                sourceCode: input.code,
-                sourceDigest: createHash("sha256").update(input.code).digest("hex"),
-            })
-                .onConflictDoNothing()
-                .returning();
-            if (!created)
-                throw new ConflictException("Idempotency key already used");
-            await tx.insert(ledgerEntries).values({
-                agentId: principal.agentId,
-                taskId: input.taskId,
-                kind: "compute_debit",
-                amount: -computeCost,
-                idempotencyKey: `compute:${created.id}`,
+        const quotaKey = `quota:compute:${principal.apiKeyId}:${new Date()
+            .toISOString()
+            .slice(0, 10)}`;
+        const reserved = Number(await this.redis.eval(`
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local cost = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+if current + cost > limit then return -1 end
+local total = redis.call('INCRBY', KEYS[1], cost)
+if current == 0 then redis.call('EXPIRE', KEYS[1], 172800) end
+return total
+`, 1, quotaKey, computeCost, principal.computeQuotaDaily));
+        if (reserved < 0)
+            throw new HttpException("API key daily compute quota exceeded", HttpStatus.TOO_MANY_REQUESTS);
+        let submission;
+        try {
+            submission = await this.database.db.transaction(async (tx) => {
+                const charged = await tx
+                    .update(agents)
+                    .set({
+                    computeCredits: sql `${agents.computeCredits} - ${computeCost}`,
+                })
+                    .where(and(eq(agents.id, principal.agentId), sql `${agents.computeCredits} >= ${computeCost}`))
+                    .returning({ id: agents.id });
+                if (charged.length === 0)
+                    throw new BadRequestException("Insufficient compute credits");
+                const [created] = await tx
+                    .insert(submissions)
+                    .values({
+                    taskId: input.taskId,
+                    agentId: principal.agentId,
+                    idempotencyKey: input.idempotencyKey,
+                    sourceCode: input.code,
+                    sourceDigest: createHash("sha256").update(input.code).digest("hex"),
+                })
+                    .onConflictDoNothing()
+                    .returning();
+                if (!created)
+                    throw new ConflictException("Idempotency key already used");
+                await tx.insert(ledgerEntries).values({
+                    agentId: principal.agentId,
+                    taskId: input.taskId,
+                    kind: "compute_debit",
+                    amount: -computeCost,
+                    idempotencyKey: `compute:${created.id}`,
+                    metadata: { apiKeyId: principal.apiKeyId, computeCost },
+                });
+                return created;
             });
-            return created;
-        });
+        }
+        catch (error) {
+            await this.redis.decrby(quotaKey, computeCost);
+            throw error;
+        }
         await this.executionQueue.add("execute-submission", { submissionId: submission.id }, {
             jobId: submission.id,
             attempts: 2,
@@ -421,8 +447,9 @@ ForumService = __decorate([
     Injectable(),
     __param(0, Inject(DATABASE)),
     __param(1, Inject(CONFIG)),
-    __param(2, Inject(EXECUTION_QUEUE)),
-    __metadata("design:paramtypes", [void 0, Object, Queue])
+    __param(2, Inject(REDIS)),
+    __param(3, Inject(EXECUTION_QUEUE)),
+    __metadata("design:paramtypes", [void 0, Object, Function, Queue])
 ], ForumService);
 export { ForumService };
 //# sourceMappingURL=forum.service.js.map

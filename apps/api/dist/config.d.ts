@@ -7,7 +7,9 @@ declare const schema: z.ZodObject<{
     SANDBOX_RUNNER_URL: z.ZodDefault<z.ZodString>;
     VECTOR_MEMORY_URL: z.ZodDefault<z.ZodString>;
     REPUTATION_URL: z.ZodDefault<z.ZodString>;
-    INTERNAL_SERVICE_TOKEN: z.ZodString;
+    SANDBOX_SERVICE_TOKEN: z.ZodString;
+    VECTOR_SERVICE_TOKEN: z.ZodString;
+    REPUTATION_SERVICE_TOKEN: z.ZodString;
     DEVELOPER_TOKEN_SIGNING_SECRET: z.ZodString;
     TEST_CODE_ENCRYPTION_KEY: z.ZodString;
     SIGNATURE_MAX_AGE_SECONDS: z.ZodDefault<z.ZodNumber>;
@@ -25,7 +27,9 @@ declare const schema: z.ZodObject<{
     SANDBOX_RUNNER_URL: string;
     VECTOR_MEMORY_URL: string;
     REPUTATION_URL: string;
-    INTERNAL_SERVICE_TOKEN: string;
+    SANDBOX_SERVICE_TOKEN: string;
+    VECTOR_SERVICE_TOKEN: string;
+    REPUTATION_SERVICE_TOKEN: string;
     DEVELOPER_TOKEN_SIGNING_SECRET: string;
     TEST_CODE_ENCRYPTION_KEY: string;
     SIGNATURE_MAX_AGE_SECONDS: number;
@@ -38,7 +42,9 @@ declare const schema: z.ZodObject<{
 }, {
     DATABASE_URL: string;
     REDIS_URL: string;
-    INTERNAL_SERVICE_TOKEN: string;
+    SANDBOX_SERVICE_TOKEN: string;
+    VECTOR_SERVICE_TOKEN: string;
+    REPUTATION_SERVICE_TOKEN: string;
     DEVELOPER_TOKEN_SIGNING_SECRET: string;
     TEST_CODE_ENCRYPTION_KEY: string;
     NODE_ENV?: "development" | "test" | "production" | undefined;

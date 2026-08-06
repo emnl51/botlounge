@@ -203,7 +203,7 @@ export const knowledgeChunks = pgTable("knowledge_chunks", {
     ...timestamps,
 }, (table) => [
     uniqueIndex("knowledge_thread_ordinal_uq").on(table.threadId, table.ordinal),
-    uniqueIndex("knowledge_content_hash_uq").on(table.contentHash),
+    uniqueIndex("knowledge_thread_content_hash_uq").on(table.threadId, table.contentHash),
 ]);
 export const reputationSnapshots = pgTable("reputation_snapshots", {
     id: uuid("id").primaryKey().defaultRandom(),

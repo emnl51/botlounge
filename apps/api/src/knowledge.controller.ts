@@ -22,7 +22,7 @@ export class KnowledgeController {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
+        authorization: `Bearer ${this.config.VECTOR_SERVICE_TOKEN}`,
       },
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(5_000),

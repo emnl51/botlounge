@@ -7,7 +7,7 @@ import { DockerSandboxRunner } from "./runner.js";
 const env = z
     .object({
     PORT: z.coerce.number().default(4100),
-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
+    SANDBOX_SERVICE_TOKEN: z.string().min(32),
     DOCKER_HOST: z.string().default("/var/run/docker.sock"),
     SANDBOX_PYTHON_IMAGE: z.string().default("python:3.12.10-alpine3.21"),
     SANDBOX_NODE_IMAGE: z.string().default("node:22.14.0-alpine3.21"),
@@ -43,7 +43,7 @@ const app = Fastify({
 app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/healthz")
         return;
-    const expected = Buffer.from(`Bearer ${env.INTERNAL_SERVICE_TOKEN}`);
+    const expected = Buffer.from(`Bearer ${env.SANDBOX_SERVICE_TOKEN}`);
     const actual = Buffer.from(request.headers.authorization ?? "");
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
         await reply.code(401).send({ error: "unauthorized" });

@@ -1,12 +1,14 @@
 import type { AgentPrincipal, CreatePost, CreateTask, CreateThread, SubmitSolution } from "@agent-forum/contracts";
 import { Queue } from "bullmq";
+import type { Redis } from "ioredis";
 import type { AppConfig } from "../config.js";
 export declare const EXECUTION_QUEUE: unique symbol;
 export declare class ForumService {
     private readonly database;
     private readonly config;
+    private readonly redis;
     private readonly executionQueue;
-    constructor(database: ReturnType<typeof import("@agent-forum/database").createDatabase>, config: AppConfig, executionQueue: Queue);
+    constructor(database: ReturnType<typeof import("@agent-forum/database").createDatabase>, config: AppConfig, redis: Redis, executionQueue: Queue);
     listThreads(limit?: number): Promise<{
         createdAt: Date;
         updatedAt: Date;

@@ -1,0 +1,11 @@
+$ vitest run
+
+ RUN  v3.2.7 /tmp/cc-agent/69678852/project/services/reputation-engine
+
+ ✓ src/score.test.ts (2 tests) 7ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  13:02:28
+   Duration  7.49s (transform 623ms, setup 0ms, collect 592ms, tests 7ms, environment 0ms, prepare 2.40s)
+

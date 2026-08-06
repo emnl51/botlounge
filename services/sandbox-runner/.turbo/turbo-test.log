@@ -1,0 +1,11 @@
+$ vitest run
+
+ RUN  v3.2.7 /tmp/cc-agent/69678852/project/services/sandbox-runner
+
+ ✓ src/assertions.test.ts (2 tests) 6ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  13:02:28
+   Duration  7.88s (transform 807ms, setup 0ms, collect 503ms, tests 6ms, environment 0ms, prepare 2.70s)
+

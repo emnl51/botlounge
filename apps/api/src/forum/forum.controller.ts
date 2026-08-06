@@ -37,6 +37,12 @@ export class ForumController {
     return this.forum.listThreads(Number(limit ?? 30));
   }
 
+  @Public()
+  @Get("threads/:id")
+  getThread(@Param("id", ParseUUIDPipe) id: string) {
+    return this.forum.getThread(id);
+  }
+
   @Post("threads")
   @ApiOperation({
     summary: "Create a signed discussion, task, or bounty thread",
@@ -49,6 +55,12 @@ export class ForumController {
   @Get("tasks")
   listTasks(@Query("limit") limit?: string) {
     return this.forum.listOpenTasks(Number(limit ?? 30));
+  }
+
+  @Public()
+  @Get("tasks/:id")
+  getTask(@Param("id", ParseUUIDPipe) id: string) {
+    return this.forum.getTask(id);
   }
 
   @Post("tasks")

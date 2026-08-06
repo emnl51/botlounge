@@ -36,18 +36,43 @@ app.post<{ Params: { agentId: string } }>(
     if (!agentId.success)
       return reply.code(400).send({ error: "invalid_agent_id" });
     const rows = await database.db.execute(sql`
-    SELECT
-      COUNT(DISTINCT s.id)::int AS attempts,
-      COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'passed')::int AS successes,
-      COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY er.duration_ms) FILTER (WHERE er.duration_ms IS NOT NULL), 0)::float AS median_runtime,
-      COALESCE(SUM(er.assertions_failed), 0)::int AS failed_tests,
-      COALESCE(SUM(er.assertions_failed + er.assertions_passed), 0)::int AS total_tests,
-      COALESCE(AVG(CASE WHEN a.verdict = CASE WHEN s.status = 'passed' THEN 'approve'::audit_verdict ELSE 'reject'::audit_verdict END THEN 1.0 ELSE 0.0 END), 0.5)::float AS audit_agreement
-    FROM submissions s
-    LEFT JOIN execution_runs er ON er.submission_id = s.id
-    LEFT JOIN audits a ON a.submission_id = s.id AND a.auditor_agent_id = ${agentId.data}::uuid
-    WHERE s.agent_id = ${agentId.data}::uuid OR a.auditor_agent_id = ${agentId.data}::uuid
-  `);
+      WITH worker_stats AS (
+        SELECT
+          COUNT(DISTINCT s.id)::int AS attempts,
+          COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'passed')::int AS successes,
+          COALESCE(
+            percentile_cont(0.5) WITHIN GROUP (
+              ORDER BY er.duration_ms
+            ) FILTER (WHERE er.duration_ms IS NOT NULL),
+            0
+          )::float AS median_runtime,
+          COALESCE(SUM(er.assertions_failed), 0)::int AS failed_tests,
+          COALESCE(SUM(er.assertions_failed + er.assertions_passed), 0)::int AS total_tests
+        FROM submissions s
+        LEFT JOIN execution_runs er ON er.submission_id = s.id
+        WHERE s.agent_id = ${agentId.data}::uuid
+      ),
+      auditor_stats AS (
+        SELECT
+          COALESCE(AVG(
+            CASE
+              WHEN a.verdict = CASE
+                WHEN s.status = 'passed' THEN 'approve'::audit_verdict
+                ELSE 'reject'::audit_verdict
+              END
+              THEN 1.0
+              ELSE 0.0
+            END
+          ), 0.5)::float AS audit_agreement
+        FROM audits a
+        INNER JOIN submissions s ON s.id = a.submission_id
+        WHERE a.auditor_agent_id = ${agentId.data}::uuid
+      )
+      SELECT
+        w.attempts, w.successes, w.median_runtime,
+        w.failed_tests, w.total_tests, au.audit_agreement
+      FROM worker_stats w, auditor_stats au
+    `);
     const metrics = rows[0] as Record<string, string | number> | undefined;
     const score = calculateReliability({
       verifiedAttempts: Number(metrics?.["attempts"] ?? 0),

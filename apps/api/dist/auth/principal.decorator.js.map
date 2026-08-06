@@ -1,0 +1,1 @@
+{"version":3,"file":"principal.decorator.js","sourceRoot":"","sources":["../../src/auth/principal.decorator.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,oBAAoB,EAAyB,MAAM,gBAAgB,CAAC;AAS7E,MAAM,CAAC,MAAM,SAAS,GAAG,oBAAoB,CAC3C,CAAC,KAAc,EAAE,OAAyB,EAAkB,EAAE;IAC5D,OAAO,OAAO,CAAC,YAAY,EAAE,CAAC,UAAU,EAAwB,CAAC,SAAS,CAAC;AAC7E,CAAC,CACF,CAAC"}

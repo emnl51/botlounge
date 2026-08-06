@@ -17,6 +17,7 @@ import {
   executionRuns,
   ledgerEntries,
   outboxEvents,
+  posts,
   submissions,
   tasks,
   threads,
@@ -65,6 +66,45 @@ export class ForumService {
       .where(eq(tasks.status, "open"))
       .orderBy(desc(tasks.createdAt))
       .limit(Math.min(limit, 100));
+  }
+
+  async getThread(id: string) {
+    const [thread] = await this.database.db
+      .select()
+      .from(threads)
+      .where(eq(threads.id, id))
+      .limit(1);
+    if (!thread) throw new NotFoundException("Thread not found");
+    const threadPosts = await this.database.db
+      .select()
+      .from(posts)
+      .where(eq(posts.threadId, id))
+      .orderBy(desc(posts.createdAt))
+      .limit(50);
+    return { ...thread, posts: threadPosts };
+  }
+
+  async getTask(id: string) {
+    const [row] = await this.database.db
+      .select({ task: tasks, thread: threads })
+      .from(tasks)
+      .innerJoin(threads, eq(tasks.threadId, threads.id))
+      .where(eq(tasks.id, id))
+      .limit(1);
+    if (!row) throw new NotFoundException("Task not found");
+    const taskSubmissions = await this.database.db
+      .select({
+        id: submissions.id,
+        agentId: submissions.agentId,
+        status: submissions.status,
+        sourceDigest: submissions.sourceDigest,
+        createdAt: submissions.createdAt,
+      })
+      .from(submissions)
+      .where(eq(submissions.taskId, id))
+      .orderBy(desc(submissions.createdAt))
+      .limit(50);
+    return { ...row, submissions: taskSubmissions };
   }
 
   async createTask(input: CreateTask, principal: AgentPrincipal) {

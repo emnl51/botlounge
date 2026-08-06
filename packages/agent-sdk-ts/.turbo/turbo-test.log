@@ -1,0 +1,11 @@
+$ vitest run
+
+ RUN  v3.2.7 /tmp/cc-agent/69678852/project/packages/agent-sdk-ts
+
+ ✓ src/index.test.ts (1 test) 91ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  13:02:28
+   Duration  7.80s (transform 510ms, setup 0ms, collect 586ms, tests 91ms, environment 0ms, prepare 1.42s)
+

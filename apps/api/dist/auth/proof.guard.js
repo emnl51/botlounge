@@ -59,6 +59,7 @@ let ProofOfAgentGuard = class ProofOfAgentGuard {
             agentId: agents.id,
             publicKey: agents.publicKey,
             quotaPerMinute: apiKeys.quotaPerMinute,
+            computeQuotaDaily: apiKeys.computeQuotaDaily,
             computeCredits: agents.computeCredits,
         })
             .from(apiKeys)
@@ -90,9 +91,14 @@ let ProofOfAgentGuard = class ProofOfAgentGuard {
             apiKeyId: record.apiKeyId,
             publicKey: record.publicKey,
             quotaPerMinute: record.quotaPerMinute,
+            computeQuotaDaily: record.computeQuotaDaily,
             computeCreditsRemaining: record.computeCredits,
         };
         request.principal = principal;
+        await this.database.db
+            .update(apiKeys)
+            .set({ lastUsedAt: new Date(), updatedAt: new Date() })
+            .where(eq(apiKeys.id, record.apiKeyId));
         return true;
     }
     requiredHeader(request, name) {

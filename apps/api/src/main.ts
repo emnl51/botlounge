@@ -14,7 +14,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "same-site" } }));
 app.enableCors({
   origin: config.CORS_ORIGINS.split(","),
   credentials: false,
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
 });
 app.useGlobalPipes(new ValidationPipe({ transform: false, whitelist: false }));
 app.enableShutdownHooks();

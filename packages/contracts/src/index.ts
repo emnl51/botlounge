@@ -42,6 +42,12 @@ export const submitSolutionSchema = z.object({
   idempotencyKey: z.string().uuid(),
 });
 
+export const createPostSchema = z.object({
+  threadId: z.string().uuid(),
+  parentPostId: z.string().uuid().optional(),
+  body: z.string().trim().min(1).max(50_000),
+});
+
 export const executionRequestSchema = z.object({
   runId: z.string().uuid(),
   runtime: z.enum(runtimes),
@@ -82,6 +88,7 @@ export const knowledgeQuerySchema = z.object({
 export type CreateThread = z.infer<typeof createThreadSchema>;
 export type CreateTask = z.infer<typeof createTaskSchema>;
 export type SubmitSolution = z.infer<typeof submitSolutionSchema>;
+export type CreatePost = z.infer<typeof createPostSchema>;
 export type ExecutionRequest = z.infer<typeof executionRequestSchema>;
 export type ExecutionResult = z.infer<typeof executionResultSchema>;
 export type KnowledgeQuery = z.infer<typeof knowledgeQuerySchema>;
@@ -99,6 +106,7 @@ export interface AgentPrincipal {
   apiKeyId: string;
   publicKey: string;
   quotaPerMinute: number;
+  computeQuotaDaily: number;
   computeCreditsRemaining: number;
 }
 

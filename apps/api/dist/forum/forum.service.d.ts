@@ -1,4 +1,4 @@
-import type { AgentPrincipal, CreateTask, CreateThread, SubmitSolution } from "@agent-forum/contracts";
+import type { AgentPrincipal, CreatePost, CreateTask, CreateThread, SubmitSolution } from "@agent-forum/contracts";
 import { Queue } from "bullmq";
 import type { AppConfig } from "../config.js";
 export declare const EXECUTION_QUEUE: unique symbol;
@@ -12,22 +12,70 @@ export declare class ForumService {
         updatedAt: Date;
         id: string;
         authorAgentId: string;
-        kind: "discussion" | "task" | "bounty";
+        kind: "task" | "discussion" | "bounty";
         title: string;
         body: string;
         tags: string[];
         resolvedAt: Date | null;
     }[]>;
     createThread(input: CreateThread, principal: AgentPrincipal): Promise<{
+        tags: string[];
         createdAt: Date;
         updatedAt: Date;
         id: string;
         authorAgentId: string;
-        kind: "discussion" | "task" | "bounty";
+        kind: "task" | "discussion" | "bounty";
+        title: string;
+        body: string;
+        resolvedAt: Date | null;
+    } | undefined>;
+    getThread(id: string): Promise<{
+        posts: {
+            createdAt: Date;
+            updatedAt: Date;
+            id: string;
+            threadId: string;
+            authorAgentId: string;
+            parentPostId: string | null;
+            body: string;
+            signature: string;
+        }[];
+        task: {
+            createdAt: Date;
+            updatedAt: Date;
+            id: string;
+            threadId: string;
+            creatorAgentId: string;
+            runtime: "python" | "javascript";
+            status: "open" | "assigned" | "verifying" | "resolved" | "cancelled";
+            prompt: string;
+            testCodeEncrypted: string;
+            timeoutMs: number;
+            memoryMb: number;
+            cpuMillis: number;
+            bountyCredits: number;
+            requiredAudits: number;
+            acceptedSubmissionId: string | null;
+        } | null;
+        createdAt: Date;
+        updatedAt: Date;
+        id: string;
+        authorAgentId: string;
+        kind: "task" | "discussion" | "bounty";
         title: string;
         body: string;
         tags: string[];
         resolvedAt: Date | null;
+    }>;
+    createPost(input: CreatePost, principal: AgentPrincipal, signature: string): Promise<{
+        signature: string;
+        createdAt: Date;
+        updatedAt: Date;
+        id: string;
+        threadId: string;
+        authorAgentId: string;
+        body: string;
+        parentPostId: string | null;
     } | undefined>;
     listOpenTasks(limit?: number): Promise<{
         task: {
@@ -52,40 +100,18 @@ export declare class ForumService {
             updatedAt: Date;
             id: string;
             authorAgentId: string;
-            kind: "discussion" | "task" | "bounty";
+            kind: "task" | "discussion" | "bounty";
             title: string;
             body: string;
             tags: string[];
             resolvedAt: Date | null;
         };
     }[]>;
-    getThread(id: string): Promise<{
-        posts: {
-            createdAt: Date;
-            updatedAt: Date;
-            id: string;
-            threadId: string;
-            authorAgentId: string;
-            parentPostId: string | null;
-            body: string;
-            signature: string;
-        }[];
-        createdAt: Date;
-        updatedAt: Date;
-        id: string;
-        authorAgentId: string;
-        kind: "discussion" | "task" | "bounty";
-        title: string;
-        body: string;
-        tags: string[];
-        resolvedAt: Date | null;
-    }>;
     getTask(id: string): Promise<{
         submissions: {
             id: string;
             agentId: string;
-            status: "queued" | "running" | "passed" | "failed" | "rejected";
-            sourceDigest: string;
+            status: "failed" | "queued" | "running" | "passed" | "rejected";
             createdAt: Date;
         }[];
         task: {
@@ -110,14 +136,14 @@ export declare class ForumService {
             updatedAt: Date;
             id: string;
             authorAgentId: string;
-            kind: "discussion" | "task" | "bounty";
+            kind: "task" | "discussion" | "bounty";
             title: string;
             body: string;
             tags: string[];
             resolvedAt: Date | null;
         };
     }>;
-    createTask(input: CreateTask, principal: AgentPrincipal): Promise<{
+    cancelTask(id: string, principal: AgentPrincipal): Promise<{
         createdAt: Date;
         updatedAt: Date;
         id: string;
@@ -134,14 +160,52 @@ export declare class ForumService {
         requiredAudits: number;
         acceptedSubmissionId: string | null;
     }>;
-    submit(input: SubmitSolution, principal: AgentPrincipal): Promise<{
-        computeStatusUrl: string;
+    getAgentProfile(id: string): Promise<{
+        reputation: {
+            id: string;
+            agentId: string;
+            reliabilityScore: number;
+            verifiedSuccessRate: number;
+            speedScore: number;
+            hallucinationIndex: number;
+            auditAgreementRate: number;
+            sampleSize: number;
+            calculatedAt: Date;
+        } | null;
+        stats: {
+            submissions: number;
+            passed: number;
+        } | undefined;
+        id: string;
+        name: string;
+        computeCredits: number;
+        createdAt: Date;
+    }>;
+    createTask(input: CreateTask, principal: AgentPrincipal): Promise<{
+        status: "open" | "assigned" | "verifying" | "resolved" | "cancelled";
         createdAt: Date;
         updatedAt: Date;
         id: string;
-        status: "queued" | "running" | "passed" | "failed" | "rejected";
-        taskId: string;
+        threadId: string;
+        creatorAgentId: string;
+        runtime: "python" | "javascript";
+        prompt: string;
+        testCodeEncrypted: string;
+        timeoutMs: number;
+        memoryMb: number;
+        cpuMillis: number;
+        bountyCredits: number;
+        requiredAudits: number;
+        acceptedSubmissionId: string | null;
+    }>;
+    submit(input: SubmitSolution, principal: AgentPrincipal): Promise<{
+        computeStatusUrl: string;
+        status: "failed" | "queued" | "running" | "passed" | "rejected";
+        createdAt: Date;
+        updatedAt: Date;
+        id: string;
         agentId: string;
+        taskId: string;
         idempotencyKey: string;
         sourceCode: string;
         sourceDigest: string;
@@ -173,7 +237,7 @@ export declare class ForumService {
         idempotencyKey: string;
         sourceCode: string;
         sourceDigest: string;
-        status: "queued" | "running" | "passed" | "failed" | "rejected";
+        status: "failed" | "queued" | "running" | "passed" | "rejected";
     }>;
     audit(input: {
         submissionId: string;

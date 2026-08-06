@@ -8,10 +8,15 @@ declare const schema: z.ZodObject<{
     VECTOR_MEMORY_URL: z.ZodDefault<z.ZodString>;
     REPUTATION_URL: z.ZodDefault<z.ZodString>;
     INTERNAL_SERVICE_TOKEN: z.ZodString;
+    DEVELOPER_TOKEN_SIGNING_SECRET: z.ZodString;
     TEST_CODE_ENCRYPTION_KEY: z.ZodString;
     SIGNATURE_MAX_AGE_SECONDS: z.ZodDefault<z.ZodNumber>;
     CORS_ORIGINS: z.ZodDefault<z.ZodString>;
     LOG_LEVEL: z.ZodDefault<z.ZodEnum<["error", "warn", "log", "debug", "verbose"]>>;
+    AUDITOR_MIN_ACCOUNT_AGE_HOURS: z.ZodDefault<z.ZodNumber>;
+    AUDITOR_MIN_SAMPLE_SIZE: z.ZodDefault<z.ZodNumber>;
+    AUDITOR_MIN_RELIABILITY: z.ZodDefault<z.ZodNumber>;
+    AUDITOR_MIN_STAKE_CREDITS: z.ZodDefault<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     NODE_ENV: "development" | "test" | "production";
     PORT: number;
@@ -21,14 +26,20 @@ declare const schema: z.ZodObject<{
     VECTOR_MEMORY_URL: string;
     REPUTATION_URL: string;
     INTERNAL_SERVICE_TOKEN: string;
+    DEVELOPER_TOKEN_SIGNING_SECRET: string;
     TEST_CODE_ENCRYPTION_KEY: string;
     SIGNATURE_MAX_AGE_SECONDS: number;
     CORS_ORIGINS: string;
     LOG_LEVEL: "error" | "warn" | "log" | "debug" | "verbose";
+    AUDITOR_MIN_ACCOUNT_AGE_HOURS: number;
+    AUDITOR_MIN_SAMPLE_SIZE: number;
+    AUDITOR_MIN_RELIABILITY: number;
+    AUDITOR_MIN_STAKE_CREDITS: number;
 }, {
     DATABASE_URL: string;
     REDIS_URL: string;
     INTERNAL_SERVICE_TOKEN: string;
+    DEVELOPER_TOKEN_SIGNING_SECRET: string;
     TEST_CODE_ENCRYPTION_KEY: string;
     NODE_ENV?: "development" | "test" | "production" | undefined;
     PORT?: number | undefined;
@@ -38,6 +49,10 @@ declare const schema: z.ZodObject<{
     SIGNATURE_MAX_AGE_SECONDS?: number | undefined;
     CORS_ORIGINS?: string | undefined;
     LOG_LEVEL?: "error" | "warn" | "log" | "debug" | "verbose" | undefined;
+    AUDITOR_MIN_ACCOUNT_AGE_HOURS?: number | undefined;
+    AUDITOR_MIN_SAMPLE_SIZE?: number | undefined;
+    AUDITOR_MIN_RELIABILITY?: number | undefined;
+    AUDITOR_MIN_STAKE_CREDITS?: number | undefined;
 }>;
 export type AppConfig = z.infer<typeof schema>;
 export declare function loadConfig(env?: NodeJS.ProcessEnv): AppConfig;

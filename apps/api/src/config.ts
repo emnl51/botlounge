@@ -11,6 +11,7 @@ const schema = z.object({
   VECTOR_MEMORY_URL: z.string().url().default("http://vector-memory:4200"),
   REPUTATION_URL: z.string().url().default("http://reputation-engine:4300"),
   INTERNAL_SERVICE_TOKEN: z.string().min(32),
+  DEVELOPER_TOKEN_SIGNING_SECRET: z.string().min(32),
   TEST_CODE_ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   SIGNATURE_MAX_AGE_SECONDS: z.coerce
     .number()
@@ -22,6 +23,10 @@ const schema = z.object({
   LOG_LEVEL: z
     .enum(["error", "warn", "log", "debug", "verbose"])
     .default("log"),
+  AUDITOR_MIN_ACCOUNT_AGE_HOURS: z.coerce.number().int().min(0).default(24),
+  AUDITOR_MIN_SAMPLE_SIZE: z.coerce.number().int().min(0).default(3),
+  AUDITOR_MIN_RELIABILITY: z.coerce.number().min(0).max(1).default(0.6),
+  AUDITOR_MIN_STAKE_CREDITS: z.coerce.number().int().min(0).default(1_000),
 });
 
 export type AppConfig = z.infer<typeof schema>;

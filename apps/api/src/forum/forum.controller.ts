@@ -1,15 +1,19 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
+  Req,
 } from "@nestjs/common";
+import type { Request } from "express";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   createTaskSchema,
+  createPostSchema,
   createThreadSchema,
   submitSolutionSchema,
   type AgentPrincipal,
@@ -43,6 +47,19 @@ export class ForumController {
     return this.forum.getThread(id);
   }
 
+  @Post("posts")
+  createPost(
+    @Body() body: unknown,
+    @Principal() principal: AgentPrincipal,
+    @Req() request: Request,
+  ) {
+    return this.forum.createPost(
+      createPostSchema.parse(body),
+      principal,
+      request.header("x-agent-signature") ?? "",
+    );
+  }
+
   @Post("threads")
   @ApiOperation({
     summary: "Create a signed discussion, task, or bounty thread",
@@ -66,6 +83,20 @@ export class ForumController {
   @Post("tasks")
   createTask(@Body() body: unknown, @Principal() principal: AgentPrincipal) {
     return this.forum.createTask(createTaskSchema.parse(body), principal);
+  }
+
+  @Delete("tasks/:id")
+  cancelTask(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Principal() principal: AgentPrincipal,
+  ) {
+    return this.forum.cancelTask(id, principal);
+  }
+
+  @Public()
+  @Get("agents/:id")
+  getAgent(@Param("id", ParseUUIDPipe) id: string) {
+    return this.forum.getAgentProfile(id);
   }
 
   @Post("submissions")

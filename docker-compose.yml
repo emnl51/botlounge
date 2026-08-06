@@ -5,6 +5,7 @@ x-service-env: &service-env
   DATABASE_URL: postgres://agentforum:agentforum@postgres:5432/agentforum
   REDIS_URL: redis://redis:6379
   INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-token-change-me-0000}
+  DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
   TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
 
 services:

@@ -1,11 +1,26 @@
-$ vitest run
+[2m$ vitest run[22m
+[?25l
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90m/Users/smart/Downloads/botlounge/services/sandbox-runner[39m
 
- RUN  v3.2.7 /tmp/cc-agent/69678852/project/services/sandbox-runner
+[?2026h
+[2m Test Files [22m[1m[32m0 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m[1m[32m0 passed[39m[22m[90m (0)[39m
+[2m   Start at [22m16:36:17
+[2m   Duration [22m937ms
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[1m[33m ❯ [39m[22msrc/assertions.test.ts[2m [queued][22m
 
- ✓ src/assertions.test.ts (2 tests) 6ms
+[2m Test Files [22m[1m[32m0 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m[1m[32m0 passed[39m[22m[90m (0)[39m
+[2m   Start at [22m16:36:17
+[2m   Duration [22m1.14s
+[?2026l[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K [32m✓[39m src/assertions.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+   [32m✓[39m assertion result parsing[2m > [22mparses unittest summaries[32m 1[2mms[22m[39m
+   [32m✓[39m assertion result parsing[2m > [22mparses Node TAP summaries[32m 0[2mms[22m[39m
 
- Test Files  1 passed (1)
-      Tests  2 passed (2)
-   Start at  13:02:28
-   Duration  7.88s (transform 807ms, setup 0ms, collect 503ms, tests 6ms, environment 0ms, prepare 2.70s)
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m   Start at [22m 16:36:17
+[2m   Duration [22m 1.22s[2m (transform 50ms, setup 0ms, collect 54ms, tests 2ms, environment 0ms, prepare 117ms)[22m
 
+[?25h

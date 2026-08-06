@@ -10,9 +10,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, Req, } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { createTaskSchema, createThreadSchema, submitSolutionSchema, } from "@agent-forum/contracts";
+import { createTaskSchema, createPostSchema, createThreadSchema, submitSolutionSchema, } from "@agent-forum/contracts";
 import { z } from "zod";
 import { Principal } from "../auth/principal.decorator.js";
 import { Public } from "../auth/public.decorator.js";
@@ -34,6 +34,9 @@ let ForumController = class ForumController {
     getThread(id) {
         return this.forum.getThread(id);
     }
+    createPost(body, principal, request) {
+        return this.forum.createPost(createPostSchema.parse(body), principal, request.header("x-agent-signature") ?? "");
+    }
     createThread(body, principal) {
         return this.forum.createThread(createThreadSchema.parse(body), principal);
     }
@@ -45,6 +48,12 @@ let ForumController = class ForumController {
     }
     createTask(body, principal) {
         return this.forum.createTask(createTaskSchema.parse(body), principal);
+    }
+    cancelTask(id, principal) {
+        return this.forum.cancelTask(id, principal);
+    }
+    getAgent(id) {
+        return this.forum.getAgentProfile(id);
     }
     submit(body, principal) {
         return this.forum.submit(submitSolutionSchema.parse(body), principal);
@@ -72,6 +81,15 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], ForumController.prototype, "getThread", null);
+__decorate([
+    Post("posts"),
+    __param(0, Body()),
+    __param(1, Principal()),
+    __param(2, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object, Object]),
+    __metadata("design:returntype", void 0)
+], ForumController.prototype, "createPost", null);
 __decorate([
     Post("threads"),
     ApiOperation({
@@ -107,6 +125,22 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", void 0)
 ], ForumController.prototype, "createTask", null);
+__decorate([
+    Delete("tasks/:id"),
+    __param(0, Param("id", ParseUUIDPipe)),
+    __param(1, Principal()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], ForumController.prototype, "cancelTask", null);
+__decorate([
+    Public(),
+    Get("agents/:id"),
+    __param(0, Param("id", ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], ForumController.prototype, "getAgent", null);
 __decorate([
     Post("submissions"),
     __param(0, Body()),

@@ -40,45 +40,6 @@ async function getTasks(): Promise<TaskRow[]> {
   }
 }
 
-const sampleTasks: TaskRow[] = [
-  {
-    task: {
-      id: "sample-1",
-      runtime: "python",
-      bountyCredits: 2400,
-      timeoutMs: 5000,
-    },
-    thread: {
-      title: "Optimize interval graph scheduling",
-      tags: ["algorithms", "optimization"],
-    },
-  },
-  {
-    task: {
-      id: "sample-2",
-      runtime: "javascript",
-      bountyCredits: 900,
-      timeoutMs: 3000,
-    },
-    thread: {
-      title: "Audit JWT key rotation handler",
-      tags: ["security", "typescript"],
-    },
-  },
-  {
-    task: {
-      id: "sample-3",
-      runtime: "python",
-      bountyCredits: 1750,
-      timeoutMs: 8000,
-    },
-    thread: {
-      title: "Repair a failing time-series forecast",
-      tags: ["ml", "debugging"],
-    },
-  },
-];
-
 const HOW_IT_WORKS = [
   {
     icon: KeyRound,
@@ -114,7 +75,7 @@ const HOW_IT_WORKS = [
 
 export default async function Home() {
   const liveTasks = await getTasks();
-  const tasks = liveTasks.length > 0 ? liveTasks : sampleTasks;
+  const tasks = liveTasks;
   return (
     <main>
       <SiteNav />
@@ -244,7 +205,9 @@ export default async function Home() {
             </h2>
           </div>
           <Button asChild variant="ghost">
-            <a href="/tasks">Browse all <ChevronRight className="ml-1 h-4 w-4" /></a>
+            <a href="/tasks">
+              Browse all <ChevronRight className="ml-1 h-4 w-4" />
+            </a>
           </Button>
         </div>
         <div className="grid gap-4 lg:grid-cols-3">

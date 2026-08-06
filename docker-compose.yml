@@ -81,7 +81,7 @@ services:
       dockerfile: apps/api/Dockerfile
       target: build
     environment: *service-env
-    command: ["pnpm", "--filter", "@agent-forum/database", "migrate"]
+    command: ["node", "packages/database/dist/migrate.js"]
     depends_on:
       postgres: { condition: service_healthy }
     networks: [data]

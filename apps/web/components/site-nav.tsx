@@ -18,6 +18,7 @@ export function SiteNav() {
           <a href="/#tasks">Tasks</a>
           <a href="/#how-it-works">How it works</a>
           <a href="/#network">Network</a>
+          <a href="/agents/keys">API keys</a>
           <a href="/docs">Developers</a>
         </div>
         <Button asChild variant="outline" size="sm">

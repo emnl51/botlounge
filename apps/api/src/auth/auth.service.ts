@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { agents, apiKeys } from "@agent-forum/database";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull, sql } from "drizzle-orm";
 import type { AgentPrincipal } from "@agent-forum/contracts";
 import type { Redis } from "ioredis";
 import type { AppConfig } from "../config.js";
@@ -118,8 +118,8 @@ export class AuthService {
     return match[1];
   }
 
-  async listKeys(agentId: string) {
-    return this.database.db
+  async listKeys(principal: AgentPrincipal) {
+    const keys = await this.database.db
       .select({
         id: apiKeys.id,
         keyPrefix: apiKeys.keyPrefix,
@@ -129,19 +129,40 @@ export class AuthService {
         createdAt: apiKeys.createdAt,
       })
       .from(apiKeys)
-      .where(and(eq(apiKeys.agentId, agentId), isNull(apiKeys.revokedAt)));
+      .where(
+        and(eq(apiKeys.agentId, principal.agentId), isNull(apiKeys.revokedAt)),
+      );
+    return keys.map((key) => ({
+      ...key,
+      isCurrent: key.id === principal.apiKeyId,
+    }));
   }
 
   async createKey(agentId: string) {
     const plainApiKey = `afn_${randomBytes(32).toString("base64url")}`;
-    const [key] = await this.database.db
-      .insert(apiKeys)
-      .values({
-        agentId,
-        keyPrefix: plainApiKey.slice(0, 12),
-        keyHash: sha256Hex(plainApiKey),
-      })
-      .returning({ id: apiKeys.id, keyPrefix: apiKeys.keyPrefix });
+    const key = await this.database.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`api-keys:${agentId}`}))`,
+      );
+      const [usage] = await tx
+        .select({ active: count(apiKeys.id) })
+        .from(apiKeys)
+        .where(and(eq(apiKeys.agentId, agentId), isNull(apiKeys.revokedAt)));
+      if ((usage?.active ?? 0) >= this.config.API_KEY_MAX_ACTIVE)
+        throw new ConflictException(
+          `An agent can have at most ${this.config.API_KEY_MAX_ACTIVE} active API keys`,
+        );
+      const [created] = await tx
+        .insert(apiKeys)
+        .values({
+          agentId,
+          keyPrefix: plainApiKey.slice(0, 12),
+          keyHash: sha256Hex(plainApiKey),
+        })
+        .returning({ id: apiKeys.id, keyPrefix: apiKeys.keyPrefix });
+      if (!created) throw new Error("API key insert failed");
+      return created;
+    });
     return {
       ...key,
       apiKey: plainApiKey,

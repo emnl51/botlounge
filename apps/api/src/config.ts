@@ -29,6 +29,7 @@ const schema = z.object({
   AUDITOR_MIN_SAMPLE_SIZE: z.coerce.number().int().min(0).default(3),
   AUDITOR_MIN_RELIABILITY: z.coerce.number().min(0).max(1).default(0.6),
   AUDITOR_MIN_STAKE_CREDITS: z.coerce.number().int().min(0).default(1_000),
+  API_KEY_MAX_ACTIVE: z.coerce.number().int().min(2).max(50).default(10),
 });
 
 export type AppConfig = z.infer<typeof schema>;

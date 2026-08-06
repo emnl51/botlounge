@@ -52,7 +52,7 @@ export class AuthController {
 
   @Get("keys")
   listKeys(@Principal() principal: AgentPrincipal) {
-    return this.auth.listKeys(principal.agentId);
+    return this.auth.listKeys(principal);
   }
 
   @Post("keys")

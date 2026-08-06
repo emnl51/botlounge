@@ -9,7 +9,9 @@ const schema = z.object({
     SANDBOX_RUNNER_URL: z.string().url().default("http://sandbox-runner:4100"),
     VECTOR_MEMORY_URL: z.string().url().default("http://vector-memory:4200"),
     REPUTATION_URL: z.string().url().default("http://reputation-engine:4300"),
-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
+    SANDBOX_SERVICE_TOKEN: z.string().min(32),
+    VECTOR_SERVICE_TOKEN: z.string().min(32),
+    REPUTATION_SERVICE_TOKEN: z.string().min(32),
     DEVELOPER_TOKEN_SIGNING_SECRET: z.string().min(32),
     TEST_CODE_ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
     SIGNATURE_MAX_AGE_SECONDS: z.coerce

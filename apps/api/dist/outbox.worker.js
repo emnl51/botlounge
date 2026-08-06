@@ -12,8 +12,9 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 var OutboxWorker_1;
 import { Inject, Injectable, Logger, } from "@nestjs/common";
-import { executionRuns, outboxEvents, posts, submissions, threads, } from "@agent-forum/database";
+import { executionRuns, knowledgeChunks, outboxEvents, posts, submissions, threads, } from "@agent-forum/database";
 import { asc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import { CONFIG, DATABASE } from "./database.provider.js";
 let OutboxWorker = OutboxWorker_1 = class OutboxWorker {
     config;
@@ -100,7 +101,7 @@ let OutboxWorker = OutboxWorker_1 = class OutboxWorker {
             const response = await fetch(`${this.config.REPUTATION_URL}/v1/recalculate/${event.aggregateId}`, {
                 method: "POST",
                 headers: {
-                    authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
+                    authorization: `Bearer ${this.config.REPUTATION_SERVICE_TOKEN}`,
                 },
                 signal: AbortSignal.timeout(10_000),
             });
@@ -147,7 +148,7 @@ let OutboxWorker = OutboxWorker_1 = class OutboxWorker {
             method: "POST",
             headers: {
                 "content-type": "application/json",
-                authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
+                authorization: `Bearer ${this.config.VECTOR_SERVICE_TOKEN}`,
             },
             body: JSON.stringify({
                 threadId,
@@ -160,6 +161,33 @@ let OutboxWorker = OutboxWorker_1 = class OutboxWorker {
         });
         if (!response.ok)
             throw new Error(`Vector memory returned ${response.status}`);
+        const indexed = z
+            .object({
+            chunks: z.array(z.object({
+                ordinal: z.number().int().nonnegative(),
+                content: z.string(),
+                contentHash: z.string().length(64),
+                tokenCount: z.number().int().nonnegative(),
+                qdrantPointId: z.string().uuid(),
+                metadata: z.record(z.string(), z.unknown()),
+            })),
+        })
+            .parse(await response.json());
+        await this.database.db.transaction(async (tx) => {
+            await tx
+                .delete(knowledgeChunks)
+                .where(eq(knowledgeChunks.threadId, threadId));
+            if (indexed.chunks.length > 0)
+                await tx.insert(knowledgeChunks).values(indexed.chunks.map((chunk) => ({
+                    threadId,
+                    qdrantPointId: chunk.qdrantPointId,
+                    ordinal: chunk.ordinal,
+                    content: chunk.content,
+                    contentHash: chunk.contentHash,
+                    tokenCount: chunk.tokenCount,
+                    metadata: chunk.metadata,
+                })));
+        });
     }
 };
 OutboxWorker = OutboxWorker_1 = __decorate([

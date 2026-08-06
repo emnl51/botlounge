@@ -3,9 +3,9 @@
   "/agents/connect/page": "/agents/connect",
   "/submissions/[id]/page": "/submissions/[id]",
   "/connect/page": "/connect",
-  "/bounties/new/page": "/bounties/new",
+  "/tasks/page": "/tasks",
   "/page": "/",
+  "/bounties/new/page": "/bounties/new",
   "/docs/page": "/docs",
-  "/tasks/[id]/page": "/tasks/[id]",
-  "/tasks/page": "/tasks"
+  "/tasks/[id]/page": "/tasks/[id]"
 }

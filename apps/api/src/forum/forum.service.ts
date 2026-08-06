@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -26,9 +28,10 @@ import {
 } from "@agent-forum/database";
 import { and, asc, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Queue } from "bullmq";
+import type { Redis } from "ioredis";
 import { createHash } from "node:crypto";
 import type { AppConfig } from "../config.js";
-import { CONFIG, DATABASE } from "../database.provider.js";
+import { CONFIG, DATABASE, REDIS } from "../database.provider.js";
 import { encryptTestCode } from "../crypto-vault.js";
 
 export const EXECUTION_QUEUE = Symbol("EXECUTION_QUEUE");
@@ -41,6 +44,7 @@ export class ForumService {
       typeof import("@agent-forum/database").createDatabase
     >,
     @Inject(CONFIG) private readonly config: AppConfig,
+    @Inject(REDIS) private readonly redis: Redis,
     @Inject(EXECUTION_QUEUE) private readonly executionQueue: Queue,
   ) {}
 
@@ -289,40 +293,76 @@ export class ForumService {
       ),
     );
 
-    const submission = await this.database.db.transaction(async (tx) => {
-      const charged = await tx
-        .update(agents)
-        .set({ computeCredits: sql`${agents.computeCredits} - ${computeCost}` })
-        .where(
-          and(
-            eq(agents.id, principal.agentId),
-            sql`${agents.computeCredits} >= ${computeCost}`,
-          ),
-        )
-        .returning({ id: agents.id });
-      if (charged.length === 0)
-        throw new BadRequestException("Insufficient compute credits");
-      const [created] = await tx
-        .insert(submissions)
-        .values({
-          taskId: input.taskId,
+    const quotaKey = `quota:compute:${principal.apiKeyId}:${new Date()
+      .toISOString()
+      .slice(0, 10)}`;
+    const reserved = Number(
+      await this.redis.eval(
+        `
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local cost = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+if current + cost > limit then return -1 end
+local total = redis.call('INCRBY', KEYS[1], cost)
+if current == 0 then redis.call('EXPIRE', KEYS[1], 172800) end
+return total
+`,
+        1,
+        quotaKey,
+        computeCost,
+        principal.computeQuotaDaily,
+      ),
+    );
+    if (reserved < 0)
+      throw new HttpException(
+        "API key daily compute quota exceeded",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+
+    let submission: typeof submissions.$inferSelect;
+    try {
+      submission = await this.database.db.transaction(async (tx) => {
+        const charged = await tx
+          .update(agents)
+          .set({
+            computeCredits: sql`${agents.computeCredits} - ${computeCost}`,
+          })
+          .where(
+            and(
+              eq(agents.id, principal.agentId),
+              sql`${agents.computeCredits} >= ${computeCost}`,
+            ),
+          )
+          .returning({ id: agents.id });
+        if (charged.length === 0)
+          throw new BadRequestException("Insufficient compute credits");
+        const [created] = await tx
+          .insert(submissions)
+          .values({
+            taskId: input.taskId,
+            agentId: principal.agentId,
+            idempotencyKey: input.idempotencyKey,
+            sourceCode: input.code,
+            sourceDigest: createHash("sha256").update(input.code).digest("hex"),
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (!created)
+          throw new ConflictException("Idempotency key already used");
+        await tx.insert(ledgerEntries).values({
           agentId: principal.agentId,
-          idempotencyKey: input.idempotencyKey,
-          sourceCode: input.code,
-          sourceDigest: createHash("sha256").update(input.code).digest("hex"),
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (!created) throw new ConflictException("Idempotency key already used");
-      await tx.insert(ledgerEntries).values({
-        agentId: principal.agentId,
-        taskId: input.taskId,
-        kind: "compute_debit",
-        amount: -computeCost,
-        idempotencyKey: `compute:${created.id}`,
+          taskId: input.taskId,
+          kind: "compute_debit",
+          amount: -computeCost,
+          idempotencyKey: `compute:${created.id}`,
+          metadata: { apiKeyId: principal.apiKeyId, computeCost },
+        });
+        return created;
       });
-      return created;
-    });
+    } catch (error) {
+      await this.redis.decrby(quotaKey, computeCost);
+      throw error;
+    }
 
     await this.executionQueue.add(
       "execute-submission",

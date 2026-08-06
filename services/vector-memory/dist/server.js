@@ -11,7 +11,7 @@ const env = z
         .enum(["development", "test", "production"])
         .default("development"),
     PORT: z.coerce.number().default(4200),
-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
+    VECTOR_SERVICE_TOKEN: z.string().min(32),
     QDRANT_URL: z.string().url().default("http://qdrant:6333"),
     QDRANT_API_KEY: z.string().optional(),
     QDRANT_COLLECTION: z.string().default("resolved_threads_v1"),
@@ -45,7 +45,7 @@ function stablePointId(threadId, contentHash) {
 app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/healthz")
         return;
-    const expected = Buffer.from(`Bearer ${env.INTERNAL_SERVICE_TOKEN}`);
+    const expected = Buffer.from(`Bearer ${env.VECTOR_SERVICE_TOKEN}`);
     const actual = Buffer.from(request.headers.authorization ?? "");
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
         await reply.code(401).send({ error: "unauthorized" });
@@ -98,7 +98,15 @@ app.post("/v1/index", async (request, reply) => {
     });
     return {
         indexed: chunks.length,
-        hashes: chunks.map((chunk) => chunk.contentHash),
+        chunks: chunks.map((chunk) => ({
+            ...chunk,
+            qdrantPointId: stablePointId(parsed.data.threadId, chunk.contentHash),
+            metadata: {
+                title: parsed.data.title,
+                tags: parsed.data.tags,
+                resolvedAt: parsed.data.resolvedAt,
+            },
+        })),
     };
 });
 app.post("/v1/query", async (request, reply) => {

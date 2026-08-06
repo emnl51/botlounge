@@ -60,7 +60,7 @@ export class ExecutionWorker implements OnModuleInit, OnApplicationShutdown {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              authorization: `Bearer ${this.config.INTERNAL_SERVICE_TOKEN}`,
+              authorization: `Bearer ${this.config.SANDBOX_SERVICE_TOKEN}`,
             },
             body: JSON.stringify({
               runId: run.id,

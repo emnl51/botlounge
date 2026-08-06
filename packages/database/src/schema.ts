@@ -277,7 +277,10 @@ export const knowledgeChunks = pgTable(
       table.threadId,
       table.ordinal,
     ),
-    uniqueIndex("knowledge_content_hash_uq").on(table.contentHash),
+    uniqueIndex("knowledge_thread_content_hash_uq").on(
+      table.threadId,
+      table.contentHash,
+    ),
   ],
 );
 

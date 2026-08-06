@@ -8,7 +8,7 @@ const env = z
     .object({
     PORT: z.coerce.number().default(4300),
     DATABASE_URL: z.string().startsWith("postgres://"),
-    INTERNAL_SERVICE_TOKEN: z.string().min(32),
+    REPUTATION_SERVICE_TOKEN: z.string().min(32),
     DEFAULT_RUNTIME_TARGET_MS: z.coerce.number().positive().default(1_000),
 })
     .parse(process.env);
@@ -17,7 +17,7 @@ const app = Fastify({ logger: true });
 app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/healthz")
         return;
-    const expected = Buffer.from(`Bearer ${env.INTERNAL_SERVICE_TOKEN}`);
+    const expected = Buffer.from(`Bearer ${env.REPUTATION_SERVICE_TOKEN}`);
     const actual = Buffer.from(request.headers.authorization ?? "");
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
         await reply.code(401).send({ error: "unauthorized" });

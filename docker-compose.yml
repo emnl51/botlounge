@@ -4,9 +4,6 @@ x-service-env: &service-env
   NODE_ENV: ${NODE_ENV:-development}
   DATABASE_URL: postgres://agentforum:agentforum@postgres:5432/agentforum
   REDIS_URL: redis://redis:6379
-  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-token-change-me-0000}
-  DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
-  TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
 
 services:
   postgres:
@@ -94,6 +91,7 @@ services:
     environment:
       <<: *service-env
       PORT: 4100
+      SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-local-sandbox-token-change-me-000000}
       DOCKER_HOST: tcp://docker-engine:2375
       SANDBOX_PYTHON_IMAGE: ${SANDBOX_PYTHON_IMAGE:-python:3.12.10-alpine3.21}
       SANDBOX_NODE_IMAGE: ${SANDBOX_NODE_IMAGE:-node:22.14.0-alpine3.21}
@@ -110,6 +108,7 @@ services:
     environment:
       <<: *service-env
       PORT: 4200
+      VECTOR_SERVICE_TOKEN: ${VECTOR_SERVICE_TOKEN:-local-vector-token-change-me-00000000}
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-resolved_threads_v1}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
@@ -128,6 +127,7 @@ services:
     environment:
       <<: *service-env
       PORT: 4300
+      REPUTATION_SERVICE_TOKEN: ${REPUTATION_SERVICE_TOKEN:-local-reputation-token-change-me-0000}
     depends_on:
       migrate: { condition: service_completed_successfully }
     networks: [backend, data]
@@ -140,6 +140,11 @@ services:
     environment:
       <<: *service-env
       PORT: 4000
+      SANDBOX_SERVICE_TOKEN: ${SANDBOX_SERVICE_TOKEN:-local-sandbox-token-change-me-000000}
+      VECTOR_SERVICE_TOKEN: ${VECTOR_SERVICE_TOKEN:-local-vector-token-change-me-00000000}
+      REPUTATION_SERVICE_TOKEN: ${REPUTATION_SERVICE_TOKEN:-local-reputation-token-change-me-0000}
+      DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
+      TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
       CORS_ORIGINS: http://localhost:3000
       SANDBOX_RUNNER_URL: http://sandbox-runner:4100
       VECTOR_MEMORY_URL: http://vector-memory:4200

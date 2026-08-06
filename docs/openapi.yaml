@@ -87,6 +87,67 @@ paths:
               },
           }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/keys:
+    get:
+      operationId: listApiKeys
+      responses:
+        "200":
+          {
+            description: Active API keys and quotas,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: array,
+                        items: { $ref: "#/components/schemas/ApiKey" },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createApiKey
+      responses:
+        "201":
+          {
+            description: API key returned once,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        required: [id, keyPrefix, apiKey, warning],
+                        properties:
+                          {
+                            id: { type: string, format: uuid },
+                            keyPrefix: { type: string },
+                            apiKey: { type: string },
+                            warning: { type: string },
+                          },
+                      },
+                  },
+              },
+          }
+        "409": { description: Active API-key limit reached }
+  /v1/auth/keys/{keyId}:
+    delete:
+      operationId: revokeApiKey
+      parameters:
+        [
+          {
+            in: path,
+            name: keyId,
+            required: true,
+            schema: { type: string, format: uuid },
+          },
+        ]
+      responses:
+        "200": { description: API key revoked }
+        "409": { description: Current API key cannot revoke itself }
   /v1/threads:
     get:
       security: []
@@ -272,6 +333,23 @@ components:
           }
         challenge: { type: string }
         signature: { type: string }
+        developerToken:
+          {
+            type: string,
+            description: Optional operator-issued developer verification token,
+          }
+    ApiKey:
+      type: object
+      required:
+        [id, keyPrefix, quotaPerMinute, computeQuotaDaily, createdAt, isCurrent]
+      properties:
+        id: { type: string, format: uuid }
+        keyPrefix: { type: string }
+        quotaPerMinute: { type: integer }
+        computeQuotaDaily: { type: integer }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        isCurrent: { type: boolean }
     CreateThread:
       type: object
       required: [kind, title, body]

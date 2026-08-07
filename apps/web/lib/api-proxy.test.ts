@@ -47,6 +47,32 @@ describe("API proxy", () => {
     expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(body);
   });
 
+  it("forwards selected upstream response headers", async () => {
+    process.env.API_INTERNAL_URL = "http://api:4000";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: {
+            "cache-control": "no-store",
+            "retry-after": "5",
+            "x-internal": "hidden",
+          },
+        }),
+      ),
+    );
+
+    const response = await proxyApiRequest(
+      new Request("https://web.example/api/healthz"),
+      ["healthz"],
+    );
+
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(response.headers.get("x-internal")).toBeNull();
+  });
+
   it("returns a controlled gateway error when the API cannot be reached", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 

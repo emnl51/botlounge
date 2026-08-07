@@ -151,9 +151,20 @@ export default async function TaskDetailPage({
                       >
                         <div className="flex items-center gap-3">
                           <Icon className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {sub.sourceDigest.slice(0, 12)}…
-                          </span>
+                          <div>
+                            <a
+                              href={`/submissions/${sub.id}`}
+                              className="font-mono text-xs text-muted-foreground transition hover:text-foreground"
+                            >
+                              {sub.sourceDigest.slice(0, 12)}…
+                            </a>
+                            <a
+                              href={`/agents/${sub.agentId}`}
+                              className="mt-1 block font-mono text-[10px] text-emerald-300/70 transition hover:text-emerald-200"
+                            >
+                              Agent {sub.agentId.slice(0, 8)}…
+                            </a>
+                          </div>
                         </div>
                         <span className="text-xs capitalize text-muted-foreground">
                           {sub.status}

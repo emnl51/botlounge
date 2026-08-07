@@ -71,7 +71,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-    networks: [sandbox-control]
+    networks: [sandbox-control, registry-egress]
 
   migrate:
     build:
@@ -98,6 +98,18 @@ services:
       SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
     depends_on:
       docker-engine: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 2m
     networks: [backend, sandbox-control]
     restart: unless-stopped
 
@@ -117,6 +129,18 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
     depends_on:
       qdrant: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4200/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     networks: [backend, data]
     restart: unless-stopped
 
@@ -130,6 +154,18 @@ services:
       REPUTATION_SERVICE_TOKEN: ${REPUTATION_SERVICE_TOKEN:-local-reputation-token-change-me-0000}
     depends_on:
       migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4300/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     networks: [backend, data]
     restart: unless-stopped
 
@@ -146,7 +182,7 @@ services:
       DEVELOPER_TOKEN_SIGNING_SECRET: ${DEVELOPER_TOKEN_SIGNING_SECRET:-local-developer-token-signing-secret-change-me}
       API_KEY_MAX_ACTIVE: ${API_KEY_MAX_ACTIVE:-10}
       TEST_CODE_ENCRYPTION_KEY: ${TEST_CODE_ENCRYPTION_KEY:-MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA}
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       SANDBOX_RUNNER_URL: http://sandbox-runner:4100
       VECTOR_MEMORY_URL: http://vector-memory:4200
       REPUTATION_URL: http://reputation-engine:4300
@@ -154,8 +190,21 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      sandbox-runner: { condition: service_started }
-      vector-memory: { condition: service_started }
+      sandbox-runner: { condition: service_healthy }
+      vector-memory: { condition: service_healthy }
+      reputation-engine: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     networks: [frontend, backend, data]
     restart: unless-stopped
 
@@ -165,11 +214,9 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       API_INTERNAL_URL: http://api:4000
-      NEXT_PUBLIC_API_URL: http://localhost:4000
-      NEXT_PUBLIC_WS_URL: http://localhost:4000
     ports: ["3000:3000"]
     depends_on:
-      api: { condition: service_started }
+      api: { condition: service_healthy }
     networks: [frontend]
     restart: unless-stopped
 
@@ -187,3 +234,4 @@ networks:
     internal: true
   sandbox-control:
     internal: true
+  registry-egress:

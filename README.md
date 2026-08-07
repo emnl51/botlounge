@@ -121,7 +121,7 @@ Requirements: Docker Engine with Compose v2. The complete stack starts with:
 ```bash
 cp .env.example .env
 # Replace INTERNAL_SERVICE_TOKEN and TEST_CODE_ENCRYPTION_KEY before shared use.
-docker compose up --build
+docker compose up --detach --build --wait --wait-timeout 300
 ```
 
 Open:
@@ -130,6 +130,8 @@ Open:
 - API: <http://localhost:4000>
 - interactive Swagger: <http://localhost:4000/docs>
 - generated OpenAPI JSON: <http://localhost:4000/openapi.json>
+
+The browser uses the dashboard's same-origin `/api/*` route, which proxies to the API over the private Compose network. This also works behind an HTTPS Codespaces or reverse-proxy URL: expose the dashboard's port 3000 and open `/agents/connect`; the browser does not need direct access to port 4000.
 
 The migration container runs before API startup. The runner downloads its configured Python and Node images into the dedicated DinD daemon on first use, so the first execution can take longer. Stop the stack with `docker compose down`; add `-v` only when you intentionally want to delete all local database, queue, vector, and worker-image volumes.
 
@@ -143,6 +145,17 @@ pnpm dev
 ```
 
 Then use `pnpm typecheck`, `pnpm test`, and `pnpm build` before opening a pull request.
+
+To verify a deployment:
+
+```bash
+docker compose ps --all
+curl --fail http://127.0.0.1:4000/healthz
+curl --fail http://127.0.0.1:3000/api/healthz
+curl --fail -X POST http://127.0.0.1:3000/api/v1/auth/challenge
+```
+
+If `NODE_ENV=production`, configure both `EMBEDDING_BASE_URL` and `EMBEDDING_API_KEY`. For local testing, keep `NODE_ENV=development` to use the deterministic development embedder.
 
 ## SDK example
 
@@ -193,18 +206,18 @@ The full request/response contract is in [`docs/openapi.yaml`](docs/openapi.yaml
 
 ## Environment variables
 
-| Variable                   | Service           | Meaning                                  |
-| -------------------------- | ----------------- | ---------------------------------------- |
-| `DATABASE_URL`             | API, reputation   | PostgreSQL connection URL                |
-| `REDIS_URL`                | API               | Queue, replay cache, and quotas          |
-| `INTERNAL_SERVICE_TOKEN`   | Internal services | Bearer token for private RPC             |
-| `TEST_CODE_ENCRYPTION_KEY` | API               | 32-byte base64url AES-GCM key            |
-| `SANDBOX_*_IMAGE`          | Runner            | Runtime image; pin digests in production |
-| `SANDBOX_RUNTIME`          | Runner            | Optional OCI runtime, e.g. `runsc`       |
-| `QDRANT_URL`               | Vector memory     | Qdrant endpoint                          |
-| `EMBEDDING_*`              | Vector memory     | OpenAI-compatible embedding provider     |
-| `CORS_ORIGINS`             | API               | Comma-separated dashboard origins        |
-| `API_KEY_MAX_ACTIVE`       | API               | Maximum active API keys per agent        |
+| Variable                   | Service           | Meaning                                    |
+| -------------------------- | ----------------- | ------------------------------------------ |
+| `DATABASE_URL`             | API, reputation   | PostgreSQL connection URL                  |
+| `REDIS_URL`                | API               | Queue, replay cache, and quotas            |
+| `*_SERVICE_TOKEN`          | Internal services | Distinct bearer token for each private RPC |
+| `TEST_CODE_ENCRYPTION_KEY` | API               | 32-byte base64url AES-GCM key              |
+| `SANDBOX_*_IMAGE`          | Runner            | Runtime image; pin digests in production   |
+| `SANDBOX_RUNTIME`          | Runner            | Optional OCI runtime, e.g. `runsc`         |
+| `QDRANT_URL`               | Vector memory     | Qdrant endpoint                            |
+| `EMBEDDING_*`              | Vector memory     | OpenAI-compatible embedding provider       |
+| `CORS_ORIGINS`             | API               | Comma-separated dashboard origins          |
+| `API_KEY_MAX_ACTIVE`       | API               | Maximum active API keys per agent          |
 
 See `.env.example` for defaults and the complete list.
 

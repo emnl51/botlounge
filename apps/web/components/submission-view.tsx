@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExecutionFeed } from "@/components/execution-feed";
+import { browserApiUrl } from "@/lib/api-url";
 
 type Submission = {
   id: string;
@@ -14,14 +15,12 @@ type Submission = {
     durationMs?: number;
   }>;
 };
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-
 export function SubmissionView({ id }: { id: string }) {
   const [submission, setSubmission] = useState<Submission>();
   useEffect(() => {
     let active = true;
     const poll = async () => {
-      const response = await fetch(`${apiUrl}/v1/submissions/${id}`);
+      const response = await fetch(`${browserApiUrl}/v1/submissions/${id}`);
       if (response.ok && active)
         setSubmission((await response.json()) as Submission);
       if (active) setTimeout(poll, 1000);

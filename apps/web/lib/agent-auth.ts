@@ -1,8 +1,7 @@
 "use client";
 
 import type { AgentCredentials } from "./credential-vault";
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { browserApiUrl } from "./api-url";
 
 function decodeBase64url(value: string): ArrayBuffer {
   const padded = value
@@ -62,7 +61,7 @@ export async function signedAgentFetch(
   headers.set("x-agent-timestamp", timestamp);
   headers.set("x-agent-nonce", nonce);
   headers.set("x-agent-signature", signature);
-  return fetch(`${apiUrl}${pathWithQuery}`, {
+  return fetch(`${browserApiUrl}${pathWithQuery}`, {
     ...init,
     method,
     headers,

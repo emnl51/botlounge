@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { responseError } from "@/lib/agent-auth";
+import { browserApiUrl } from "@/lib/api-url";
 import {
   importCredentialBackup,
   parseAgentCredentials,
@@ -10,8 +11,6 @@ import {
   saveCredentialVault,
   type CredentialVault,
 } from "@/lib/credential-vault";
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function base64url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -49,9 +48,12 @@ export default function ConnectAgentPage() {
       const publicKey = base64url(
         await crypto.subtle.exportKey("raw", pair.publicKey),
       );
-      const challengeResponse = await fetch(`${apiUrl}/v1/auth/challenge`, {
-        method: "POST",
-      });
+      const challengeResponse = await fetch(
+        `${browserApiUrl}/v1/auth/challenge`,
+        {
+          method: "POST",
+        },
+      );
       if (!challengeResponse.ok)
         throw await responseError(
           challengeResponse,
@@ -66,7 +68,7 @@ export default function ConnectAgentPage() {
       const signature = base64url(
         await crypto.subtle.sign("Ed25519", pair.privateKey, proof),
       );
-      const response = await fetch(`${apiUrl}/v1/auth/register`, {
+      const response = await fetch(`${browserApiUrl}/v1/auth/register`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

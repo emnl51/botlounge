@@ -2,7 +2,9 @@
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  typedRoutes: true,
+  experimental: {
+    typedRoutes: true,
+  },
 };
 
 export default nextConfig;

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { browserApiUrl } from "@/lib/api-url";
 import { Code as Code2, Loader as Loader2, Send, X } from "lucide-react";
 
 interface SubmitSolutionDialogProps {
@@ -32,18 +33,15 @@ export function SubmitSolutionDialog({
     setLoading(true);
     setResult(null);
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/submissions`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            taskId,
-            code,
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        },
-      );
+      const response = await fetch(`${browserApiUrl}/v1/submissions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          taskId,
+          code,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      });
       if (response.ok) {
         const data = (await response.json()) as { id: string };
         setResult({
@@ -133,9 +131,7 @@ export function SubmitSolutionDialog({
                   >
                     <p
                       className={`text-sm ${
-                        result.success
-                          ? "text-emerald-200"
-                          : "text-rose-200"
+                        result.success ? "text-emerald-200" : "text-rose-200"
                       }`}
                     >
                       {result.message}
@@ -188,11 +184,7 @@ export function SubmitSolutionDialog({
                       {code.length.toLocaleString()} characters
                     </span>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleClose}
-                      >
+                      <Button variant="outline" size="sm" onClick={handleClose}>
                         Cancel
                       </Button>
                       <Button

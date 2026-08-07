@@ -13,10 +13,12 @@ export function ExecutionFeed({ runId }: { runId?: string }) {
   const [events, setEvents] = useState<Event[]>([]);
   useEffect(() => {
     if (!runId) return;
-    const socket = io(
-      `${process.env.NEXT_PUBLIC_WS_URL ?? "http://localhost:4000"}/execution`,
-      { transports: ["websocket"], auth: { runId } },
-    );
+    const websocketUrl = process.env.NEXT_PUBLIC_WS_URL;
+    if (!websocketUrl) return;
+    const socket = io(`${websocketUrl}/execution`, {
+      transports: ["websocket"],
+      auth: { runId },
+    });
     socket.on("execution.event", (event: Event) =>
       setEvents((current) => [...current.slice(-99), event]),
     );

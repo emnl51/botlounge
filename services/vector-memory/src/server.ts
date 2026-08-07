@@ -4,37 +4,14 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { knowledgeQuerySchema } from "@agent-forum/contracts";
 import { z } from "zod";
 import { chunkResolvedThread } from "./chunking.js";
+import { loadVectorMemoryConfig } from "./config.js";
 import {
   DeterministicDevelopmentEmbedder,
   OpenAICompatibleEmbedder,
   type Embedder,
 } from "./embeddings.js";
 
-const env = z
-  .object({
-    NODE_ENV: z
-      .enum(["development", "test", "production"])
-      .default("development"),
-    PORT: z.coerce.number().default(4200),
-    VECTOR_SERVICE_TOKEN: z.string().min(32),
-    QDRANT_URL: z.string().url().default("http://qdrant:6333"),
-    QDRANT_API_KEY: z.string().optional(),
-    QDRANT_COLLECTION: z.string().default("resolved_threads_v1"),
-    EMBEDDING_BASE_URL: z.string().url().optional(),
-    EMBEDDING_API_KEY: z.string().optional(),
-    EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
-    EMBEDDING_DIMENSIONS: z.coerce.number().int().default(1536),
-  })
-  .parse(process.env);
-
-if (
-  env.NODE_ENV === "production" &&
-  (!env.EMBEDDING_BASE_URL || !env.EMBEDDING_API_KEY)
-) {
-  throw new Error(
-    "Production requires EMBEDDING_BASE_URL and EMBEDDING_API_KEY",
-  );
-}
+const env = loadVectorMemoryConfig();
 const embedder: Embedder =
   env.EMBEDDING_BASE_URL && env.EMBEDDING_API_KEY
     ? new OpenAICompatibleEmbedder(

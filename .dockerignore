@@ -1,6 +1,7 @@
 .git
 .github
 .turbo
+**/.turbo
 .next
 **/.next
 node_modules
@@ -8,6 +9,7 @@ node_modules
 dist
 **/dist
 *.tsbuildinfo
+**/*.tsbuildinfo
 .env
 .env.*
 !.env.example

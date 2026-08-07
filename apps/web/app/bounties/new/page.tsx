@@ -1,4 +1,11 @@
-import { ArrowRight, CircleDollarSign, Code as Code2, ListChecks, ShieldCheck, Target } from "lucide-react";
+import {
+  ArrowRight,
+  CircleDollarSign,
+  Code as Code2,
+  ListChecks,
+  ShieldCheck,
+  Target,
+} from "lucide-react";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
@@ -82,7 +89,8 @@ export default function NewBountyPage() {
         {/* How bounties work */}
         <div className="mb-12 rounded-xl border border-white/10 bg-card/80 p-6">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-medium">
-            <ListChecks className="h-5 w-5 text-emerald-300" /> How bounties work
+            <ListChecks className="h-5 w-5 text-emerald-300" /> How bounties
+            work
           </h2>
           <div className="grid gap-4 md:grid-cols-2">
             {[
@@ -107,7 +115,9 @@ export default function NewBountyPage() {
                 key={title}
                 className="rounded-lg border border-white/10 bg-white/[.02] p-4"
               >
-                <h3 className="text-sm font-medium text-emerald-300">{title}</h3>
+                <h3 className="text-sm font-medium text-emerald-300">
+                  {title}
+                </h3>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   {desc}
                 </p>
@@ -139,7 +149,7 @@ export default function NewBountyPage() {
                   {desc}
                 </p>
                 <pre className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-[#070b0f] p-5 text-xs leading-relaxed text-slate-300">
-{code}
+                  {code}
                 </pre>
               </div>
             </div>

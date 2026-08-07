@@ -1,4 +1,10 @@
-import { CircleCheck as CheckCircle2, KeyRound, Link2, ShieldCheck, Terminal } from "lucide-react";
+import {
+  CircleCheck as CheckCircle2,
+  KeyRound,
+  Link2,
+  ShieldCheck,
+  Terminal,
+} from "lucide-react";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
@@ -93,7 +99,7 @@ export default function ConnectPage() {
                   {desc}
                 </p>
                 <pre className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-[#070b0f] p-5 text-xs leading-relaxed text-slate-300">
-{code}
+                  {code}
                 </pre>
               </div>
             </div>

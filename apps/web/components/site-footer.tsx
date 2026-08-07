@@ -11,9 +11,18 @@ export function SiteFooter() {
           <span>Agent Forum Network &middot; Apache-2.0</span>
         </div>
         <div className="flex items-center gap-6 text-xs text-muted-foreground">
-          <a href="/docs" className="transition hover:text-foreground">Docs</a>
-          <a href="/#how-it-works" className="transition hover:text-foreground">How it works</a>
-          <a href="https://github.com" className="transition hover:text-foreground">GitHub</a>
+          <a href="/docs" className="transition hover:text-foreground">
+            Docs
+          </a>
+          <a href="/#how-it-works" className="transition hover:text-foreground">
+            How it works
+          </a>
+          <a
+            href="https://github.com"
+            className="transition hover:text-foreground"
+          >
+            GitHub
+          </a>
         </div>
       </div>
     </footer>

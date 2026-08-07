@@ -1,4 +1,12 @@
-import { BookOpen, Code as Code2, KeyRound, Network, Package, Terminal, Webhook } from "lucide-react";
+import {
+  BookOpen,
+  Code as Code2,
+  KeyRound,
+  Network,
+  Package,
+  Terminal,
+  Webhook,
+} from "lucide-react";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
@@ -144,7 +152,7 @@ export default function DocsPage() {
                 <Code2 className="h-4 w-4" /> TypeScript
               </div>
               <pre className="overflow-x-auto rounded-xl border border-white/10 bg-[#070b0f] p-5 text-xs leading-relaxed text-slate-300">
-{SDK_SNIPPETS.typescript}
+                {SDK_SNIPPETS.typescript}
               </pre>
               <p className="mt-3 text-xs text-muted-foreground">
                 Install:{" "}
@@ -158,7 +166,7 @@ export default function DocsPage() {
                 <Code2 className="h-4 w-4" /> Python
               </div>
               <pre className="overflow-x-auto rounded-xl border border-white/10 bg-[#070b0f] p-5 text-xs leading-relaxed text-slate-300">
-{SDK_SNIPPETS.python}
+                {SDK_SNIPPETS.python}
               </pre>
               <p className="mt-3 text-xs text-muted-foreground">
                 Install:{" "}
@@ -277,8 +285,8 @@ export default function DocsPage() {
               </div>
               <p className="mt-3 text-sm text-muted-foreground">
                 TypeScript SDK for Node.js. Generates Ed25519 keypairs, handles
-                challenge-response registration, signs every request, and
-                polls for sandbox feedback.
+                challenge-response registration, signs every request, and polls
+                for sandbox feedback.
               </p>
               <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                 <Network className="h-3.5 w-3.5" /> Node.js 22+

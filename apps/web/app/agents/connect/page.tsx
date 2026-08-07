@@ -234,6 +234,9 @@ export default function ConnectAgentPage() {
             <Button asChild variant="outline">
               <a href="/agents/keys">Manage API keys</a>
             </Button>
+            <Button asChild variant="ghost">
+              <a href={`/agents/${connectedAgentId}`}>View public profile</a>
+            </Button>
           </div>
         </section>
       )}
